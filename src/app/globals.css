@@ -1,0 +1,169 @@
+@import "tailwindcss";
+
+/*
+ * Tokens do design system "Sabor & Rotina Vibrante" (Safran Congelados).
+ *
+ * Superfícies claras em linho servindo de palco para a foto do prato, violeta
+ * da flor do açafrão na ação, açafrão solar no alerta e verde manjericão no
+ * nutricional.
+ *
+ * Toda cor de fundo suave tem um par `on-*` para o texto. Usar o `-foreground`
+ * de uma cor sólida como texto sobre o fundo suave dela deixa branco sobre
+ * quase branco.
+ */
+:root {
+  --radius: 0.5rem;
+
+  --background: #faf7f2;
+  --foreground: #271f30;
+
+  --card: #ffffff;
+  --card-foreground: #271f30;
+
+  --popover: #ffffff;
+  --popover-foreground: #271f30;
+
+  --primary: #842a9b;
+  --primary-hover: #690481;
+  --primary-foreground: #ffffff;
+  --primary-soft: #f4eaf8;
+  --on-primary-soft: #842a9b;
+
+  --secondary: #f3ece3;
+  --secondary-foreground: #271f30;
+
+  --muted: #f3ece3;
+  --muted-foreground: #4f4350;
+  --faint: #817381;
+
+  --accent: #f4eaf8;
+  --accent-foreground: #842a9b;
+
+  --destructive: #ba1a1a;
+  --destructive-hover: #93000a;
+  --destructive-foreground: #ffffff;
+  --destructive-soft: #ffdad6;
+  --on-destructive-soft: #93000a;
+
+  /* Verde manjericão: saudável, nutricional, confirmação. */
+  --success: #1b8a5a;
+  --success-foreground: #ffffff;
+  --success-soft: #e8f6f0;
+  --on-success-soft: #1b8a5a;
+
+  /* Açafrão solar: atenção, promoção, logística. */
+  --warning: #e59b12;
+  --warning-foreground: #ffffff;
+  --warning-soft: #fef3c7;
+  --on-warning-soft: #92400e;
+
+  /* Azul térmico: congelado, tempo de preparo. */
+  --thermal-soft: #e8f0fe;
+  --on-thermal-soft: #1a56db;
+
+  --border: #e9e0d4;
+  --input: #e9e0d4;
+  --ring: #842a9b;
+
+  --sidebar: #f3ece3;
+  --sidebar-foreground: #271f30;
+  --sidebar-primary: #842a9b;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #f4eaf8;
+  --sidebar-accent-foreground: #842a9b;
+  --sidebar-border: #e9e0d4;
+
+  /* Sombra com matiz berinjela: cinza puro suja o fundo linho. */
+  --elevation-1: 0px 4px 16px -2px rgb(39 31 48 / 0.06);
+  --elevation-2: 0px 10px 24px -4px rgb(39 31 48 / 0.12);
+  --elevation-3: 0px 20px 32px -6px rgb(39 31 48 / 0.2);
+}
+
+@theme inline {
+  --radius-sm: 0.25rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.5rem;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-soft: var(--primary-soft);
+  --color-on-primary-soft: var(--on-primary-soft);
+
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-faint: var(--faint);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+
+  --color-destructive: var(--destructive);
+  --color-destructive-hover: var(--destructive-hover);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-destructive-soft: var(--destructive-soft);
+  --color-on-destructive-soft: var(--on-destructive-soft);
+
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-success-soft: var(--success-soft);
+  --color-on-success-soft: var(--on-success-soft);
+
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-warning-soft: var(--warning-soft);
+  --color-on-warning-soft: var(--on-warning-soft);
+
+  --color-thermal-soft: var(--thermal-soft);
+  --color-on-thermal-soft: var(--on-thermal-soft);
+
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+
+  --shadow-elevation-1: var(--elevation-1);
+  --shadow-elevation-2: var(--elevation-2);
+  --shadow-elevation-3: var(--elevation-3);
+
+  /* Fonte do sistema: carrega na hora e tem algarismos tabulares bons para valores. */
+  --font-display: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+
+body {
+  background: var(--color-background);
+  color: var(--color-foreground);
+}
+
+* {
+  border-color: var(--color-border);
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--font-display), var(--font-sans);
+  letter-spacing: -0.01em;
+}
+
+/* Dígito em coluna precisa alinhar: todo valor da DRE e do extrato. */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
