@@ -39,13 +39,19 @@ DRE e no fluxo — no cartão, o dinheiro sai quando a fatura é paga.
 
 Ver `.env.local.example`: `DATABASE_URL` (Session pooler da Supabase),
 `SESSION_SECRET`, `PLUGGY_CLIENT_ID`, `PLUGGY_CLIENT_SECRET`, `CRON_SECRET`,
-`PLUGGY_WEBHOOK_SECRET`.
+`PLUGGY_WEBHOOK_SECRET` e, para o primeiro acesso, `USUARIO_INICIAL_EMAIL` /
+`USUARIO_INICIAL_SENHA`.
+
+A senha do banco vai dentro da `DATABASE_URL`: caractere especial precisa ser
+codificado (`#` vira `%23`, `@` vira `%40`), senão a URL quebra.
 
 ## Deploy
 
 O build (`npm run build`) aplica as migrations pendentes antes do
 `next build` (`scripts/migrate.mjs`): tabelas e plano de contas inicial são
-criados na primeira publicação. Depois, crie os acessos:
+criados na primeira publicação. Com `USUARIO_INICIAL_EMAIL` e
+`USUARIO_INICIAL_SENHA` na Vercel, o mesmo build cria o primeiro acesso (só se
+o e-mail ainda não existir). Outros acessos:
 
 ```bash
 npm run usuario:criar -- email@dominio.com "Nome"   # mostra a senha provisória
