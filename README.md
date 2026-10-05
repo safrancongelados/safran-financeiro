@@ -37,7 +37,9 @@ DRE e no fluxo — no cartão, o dinheiro sai quando a fatura é paga.
 
 ## Variáveis de ambiente (Vercel → Settings → Environment Variables)
 
-Ver `.env.local.example`: `DATABASE_URL` (Session pooler da Supabase),
+Ver `.env.local.example`: `DATABASE_URL` (**Transaction pooler** da
+Supabase, porta 6543 — o Session pooler esgota o limite de 15 clientes com as
+funções da Vercel),
 `SESSION_SECRET`, `PLUGGY_CLIENT_ID`, `PLUGGY_CLIENT_SECRET`, `CRON_SECRET`,
 `PLUGGY_WEBHOOK_SECRET` e, para o primeiro acesso, `USUARIO_INICIAL_EMAIL` /
 `USUARIO_INICIAL_SENHA`.

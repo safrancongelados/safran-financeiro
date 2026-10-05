@@ -23,7 +23,7 @@ if (senha.length < 8) {
   process.exit(1);
 }
 
-const sql = postgres(url, { max: 1, connect_timeout: 30, onnotice: () => {} });
+const sql = postgres(url, { max: 1, connect_timeout: 30, prepare: false, onnotice: () => {} });
 try {
   const senhaHash = await bcrypt.hash(senha, 10);
   const criados = await sql`

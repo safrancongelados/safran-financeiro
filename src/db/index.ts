@@ -14,7 +14,18 @@ function obterInstancia(): PostgresJsDatabase<typeof schema> {
     if (!connectionString) {
       throw new Error("DATABASE_URL não configurada");
     }
-    const client = postgres(connectionString);
+    // Feito para função serverless atrás do pooler da Supabase:
+    // - prepare: false — o Transaction pooler (porta 6543) troca a conexão
+    //   real a cada transação, e prepared statement não sobrevive à troca;
+    // - max baixo e idle_timeout — cada instância da função segura poucas
+    //   conexões e devolve as ociosas. Sem isso, o Session pooler esgotou o
+    //   limite de 15 clientes no primeiro acesso (EMAXCONNSESSION).
+    const client = postgres(connectionString, {
+      prepare: false,
+      max: 3,
+      idle_timeout: 20,
+      connect_timeout: 15,
+    });
     instancia = drizzle(client, { schema });
   }
   return instancia;

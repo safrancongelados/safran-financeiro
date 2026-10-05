@@ -293,6 +293,10 @@ export default async function ExtratoPage({ searchParams }: PageProps<"/extrato"
                   </TableCell>
                   <TableCell>
                     <CategoriaSelect
+                      // A chave muda junto com a categoria: quando uma regra
+                      // recategoriza a linha no servidor, o seletor remonta
+                      // com o valor novo em vez de manter o antigo.
+                      key={`${l.id}-${l.categoriaId ?? "sem"}`}
                       movimentacaoId={l.id}
                       categoriaId={l.categoriaId}
                       categoriaNome={l.categoriaNome}

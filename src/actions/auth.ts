@@ -11,9 +11,13 @@ export interface FormState {
   ok?: string;
 }
 
-/** Só aceita voltar para um caminho interno. Sem isso, `?de=` viraria redirecionamento aberto. */
+/**
+ * Só aceita voltar para um caminho interno. Sem isso, `?de=` viraria
+ * redirecionamento aberto — inclusive com barra invertida: o navegador lê
+ * "/\site.com" como "//site.com".
+ */
 function destinoSeguro(de: string | null): string {
-  if (!de || !de.startsWith("/") || de.startsWith("//") || de.startsWith("/login")) return "/";
+  if (!de || !de.startsWith("/") || /^\/[\\/]/.test(de) || de.includes("\\") || de.startsWith("/login")) return "/";
   return de;
 }
 
@@ -24,7 +28,15 @@ export async function loginAction(_prev: FormState, formData: FormData): Promise
 
   if (!email || !senha) return { erro: "Informe email e senha." };
 
-  const [usuario] = await db.select().from(usuarios).where(eq(usuarios.email, email)).limit(1);
+  let usuario: typeof usuarios.$inferSelect | undefined;
+  try {
+    [usuario] = await db.select().from(usuarios).where(eq(usuarios.email, email)).limit(1);
+  } catch (err) {
+    // Falha de banco no login vira mensagem na tela, não página de erro; o
+    // detalhe vai para o registro da Vercel.
+    console.error("[login] falha ao consultar usuários:", err);
+    return { erro: "Não foi possível conectar ao banco agora. Tente de novo em instantes." };
+  }
   if (!usuario || !(await verificarSenha(senha, usuario.senhaHash))) {
     return { erro: "Email ou senha incorretos." };
   }

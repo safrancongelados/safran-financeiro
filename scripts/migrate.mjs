@@ -8,6 +8,10 @@
  *
  * Não usa `drizzle-kit migrate`, que trava indefinidamente contra este
  * Postgres; executa o SQL gerado direto.
+ *
+ * Tudo roda numa transação só, com trava de transação: assim funciona também
+ * pelo Transaction pooler da Supabase (porta 6543), onde uma trava de sessão
+ * ficaria presa numa conexão que o pooler já devolveu para outro cliente.
  */
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
@@ -17,7 +21,7 @@ import postgres from "postgres";
 const RAIZ = join(dirname(fileURLToPath(import.meta.url)), "..");
 const PASTA = join(RAIZ, "drizzle");
 
-/** Trava de sessão: dois deploys simultâneos não aplicam a mesma migration. */
+/** Trava: dois deploys simultâneos não aplicam a mesma migration. */
 const CHAVE_TRAVA = 4713027;
 
 /**
@@ -45,7 +49,7 @@ function log(msg) {
   console.log(`[migrate] ${msg}`);
 }
 
-async function aplicarMigration(sql, entrada) {
+async function aplicarMigration(tx, entrada) {
   const comandos = readFileSync(join(PASTA, `${entrada.tag}.sql`), "utf8")
     .split("--> statement-breakpoint")
     .map((s) => s.trim())
@@ -54,22 +58,20 @@ async function aplicarMigration(sql, entrada) {
   let aplicados = 0;
   let ignorados = 0;
 
-  // A migration inteira numa transação; cada comando num savepoint, para que um
-  // "já existe" tolerado não aborte os comandos seguintes.
-  await sql.begin(async (tx) => {
-    for (const comando of comandos) {
-      try {
-        await tx.savepoint(async (sp) => {
-          await sp.unsafe(comando);
-        });
-        aplicados++;
-      } catch (err) {
-        if (!JA_EXISTE.has(codigoDoErro(err))) throw err;
-        ignorados++;
-      }
+  // Cada comando num savepoint, para que um "já existe" tolerado não aborte os
+  // comandos seguintes.
+  for (const comando of comandos) {
+    try {
+      await tx.savepoint(async (sp) => {
+        await sp.unsafe(comando);
+      });
+      aplicados++;
+    } catch (err) {
+      if (!JA_EXISTE.has(codigoDoErro(err))) throw err;
+      ignorados++;
     }
-    await tx`insert into "_migracoes" ("tag") values (${entrada.tag})`;
-  });
+  }
+  await tx`insert into "_migracoes" ("tag") values (${entrada.tag})`;
 
   return { aplicados, ignorados, total: comandos.length };
 }
@@ -91,39 +93,41 @@ async function main() {
   const entradas = [...journal.entries].sort((a, b) => a.idx - b.idx);
 
   // onnotice silenciado: "already exists, skipping" é esperado aqui e só poluiria o log do deploy.
-  const sql = postgres(url, { max: 1, idle_timeout: 20, connect_timeout: 30, onnotice: () => {} });
+  // prepare: false — exigido pelo Transaction pooler da Supabase.
+  const sql = postgres(url, { max: 1, idle_timeout: 20, connect_timeout: 30, prepare: false, onnotice: () => {} });
 
   try {
-    await sql`select pg_advisory_lock(${CHAVE_TRAVA})`;
+    await sql.begin(async (tx) => {
+      await tx`select pg_advisory_xact_lock(${CHAVE_TRAVA})`;
 
-    await sql`
-      create table if not exists "_migracoes" (
-        "tag" text primary key,
-        "aplicada_em" timestamptz not null default now()
-      )
-    `;
+      await tx`
+        create table if not exists "_migracoes" (
+          "tag" text primary key,
+          "aplicada_em" timestamptz not null default now()
+        )
+      `;
 
-    const jaAplicadas = new Set((await sql`select tag from "_migracoes"`).map((l) => l.tag));
-    const pendentes = entradas.filter((e) => !jaAplicadas.has(e.tag));
+      const jaAplicadas = new Set((await tx`select tag from "_migracoes"`).map((l) => l.tag));
+      const pendentes = entradas.filter((e) => !jaAplicadas.has(e.tag));
 
-    if (pendentes.length === 0) {
-      log(`nada pendente (${entradas.length} já registradas).`);
-      return;
-    }
+      if (pendentes.length === 0) {
+        log(`nada pendente (${entradas.length} já registradas).`);
+        return;
+      }
 
-    log(`${pendentes.length} pendente(s): ${pendentes.map((p) => p.tag).join(", ")}`);
+      log(`${pendentes.length} pendente(s): ${pendentes.map((p) => p.tag).join(", ")}`);
 
-    for (const entrada of pendentes) {
-      const r = await aplicarMigration(sql, entrada);
-      log(
-        `${entrada.tag}: ${r.aplicados}/${r.total} aplicado(s)` +
-          (r.ignorados > 0 ? `, ${r.ignorados} já existia(m)` : "")
-      );
-    }
+      for (const entrada of pendentes) {
+        const r = await aplicarMigration(tx, entrada);
+        log(
+          `${entrada.tag}: ${r.aplicados}/${r.total} aplicado(s)` +
+            (r.ignorados > 0 ? `, ${r.ignorados} já existia(m)` : "")
+        );
+      }
 
-    log("migrations em dia.");
+      log("migrations em dia.");
+    });
   } finally {
-    await sql`select pg_advisory_unlock(${CHAVE_TRAVA})`.catch(() => {});
     await sql.end({ timeout: 5 });
   }
 }
