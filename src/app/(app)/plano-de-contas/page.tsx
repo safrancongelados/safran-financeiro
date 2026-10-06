@@ -12,6 +12,8 @@ import { CategoriaForm } from "./categoria-form";
 import { RegraForm } from "./regra-form";
 
 export const dynamic = "force-dynamic";
+// Só leitura: se o banco travar, falha rápido e mostra "tentar de novo".
+export const maxDuration = 30;
 
 const CAMPO = { documento: "CPF/CNPJ é", contraparte: "Contraparte contém", descricao: "Descrição contém" } as const;
 const SENTIDO = { entrada: "entradas", saida: "saídas", ambos: "entradas e saídas" } as const;

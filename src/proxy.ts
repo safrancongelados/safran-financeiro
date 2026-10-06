@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { COOKIE_NAME, verificarToken } from "@/lib/auth";
 
 /**
- * Tudo é privado, menos o login e as rotas que a Vercel (cron) e a Pluggy
- * (webhook) chamam — essas se protegem com segredo próprio.
+ * Tudo é privado, menos o login e as rotas que a Vercel (cron), a Pluggy
+ * (webhook) e o suporte (diagnóstico) chamam — essas se protegem com segredo
+ * próprio.
  */
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -24,5 +25,5 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!api/cron|api/webhooks|_next/static|_next/image|favicon.ico).*)"],
+  matcher: ["/((?!api/cron|api/webhooks|api/diagnostico|_next/static|_next/image|favicon.ico).*)"],
 };

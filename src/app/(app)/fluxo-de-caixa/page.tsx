@@ -16,6 +16,8 @@ import { StatTile } from "@/components/stat-tile";
 import { TabelaMensal, type LinhaTabela } from "@/components/tabela-mensal";
 
 export const dynamic = "force-dynamic";
+// Só leitura: se o banco travar, falha rápido e mostra "tentar de novo".
+export const maxDuration = 30;
 
 const DATA_HORA = new Intl.DateTimeFormat("pt-BR", {
   day: "2-digit",
