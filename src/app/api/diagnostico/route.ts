@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { asc, sql } from "drizzle-orm";
 import { db } from "@/db";
+import { buscarContas, buscarItem, PluggyErro } from "@/lib/pluggy/client";
 import {
   categorias,
   conexoesBancarias,
@@ -20,12 +21,41 @@ export const maxDuration = 30;
  * Protegido pelo CRON_SECRET (na query, `?segredo=`, para dar para abrir no
  * navegador). Só devolve contagens e status — nenhum valor em reais, nome de
  * cliente ou dado da conta.
+ *
+ * Com `&item=<id>`, pergunta também à Pluggy se as credenciais da Safran
+ * enxergam aquela conexão (só leitura, nada é gravado). Serve para saber se
+ * uma conexão do Meu Pluggy já foi liberada para a aplicação.
  */
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+async function testarItemNaPluggy(itemId: string) {
+  try {
+    const item = await buscarItem(itemId);
+    const contas = await buscarContas(itemId);
+    return {
+      enxerga: true,
+      instituicao: item.connector?.name ?? null,
+      status: item.status,
+      atualizadoEm: item.lastUpdatedAt ?? null,
+      contas: contas.map((c) => ({ tipo: c.type, subtipo: c.subtype ?? null })),
+    };
+  } catch (err) {
+    return {
+      enxerga: false,
+      status: err instanceof PluggyErro ? err.status : null,
+      erro: err instanceof Error ? err.message.slice(0, 300) : String(err),
+    };
+  }
+}
 export async function GET(request: Request) {
   const segredo = process.env.CRON_SECRET;
   if (!segredo || new URL(request.url).searchParams.get("segredo") !== segredo) {
     return NextResponse.json({ erro: "não autorizado" }, { status: 401 });
   }
+
+  const itemParam = new URL(request.url).searchParams.get("item");
+  const pluggy = itemParam && UUID.test(itemParam) ? await testarItemNaPluggy(itemParam.toLowerCase()) : undefined;
 
   const inicio = Date.now();
   try {
@@ -77,6 +107,7 @@ export async function GET(request: Request) {
     ]);
 
     return NextResponse.json({
+      ...(pluggy ? { pluggy } : {}),
       banco: { ok: true, latenciaMs },
       conexoes,
       contas,
@@ -87,7 +118,10 @@ export async function GET(request: Request) {
     console.error("[diagnostico]", err);
     const causa = (err as { cause?: { message?: string } })?.cause?.message;
     return NextResponse.json(
-      { banco: { ok: false, latenciaMs: Date.now() - inicio, erro: causa ?? (err instanceof Error ? err.message : String(err)) } },
+      {
+        ...(pluggy ? { pluggy } : {}),
+        banco: { ok: false, latenciaMs: Date.now() - inicio, erro: causa ?? (err instanceof Error ? err.message : String(err)) },
+      },
       { status: 500 }
     );
   }
