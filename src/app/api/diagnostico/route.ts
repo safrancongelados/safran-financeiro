@@ -23,8 +23,8 @@ export const maxDuration = 30;
  * cliente ou dado da conta.
  *
  * Com `&detalhe=1`, inclui o que falta categorizar agrupado (ver
- * detalharPendencias) — esse modo traz totais em reais e nomes de fornecedores
- * pessoa jurídica.
+ * detalharPendencias) — esse modo traz totais em reais e nomes de
+ * contrapartes.
  *
  * Com `&item=<id>`, pergunta também à Pluggy se as credenciais da Safran
  * enxergam aquela conexão (só leitura, nada é gravado). Serve para saber se
@@ -37,8 +37,9 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
  * Com `&detalhe=1`: o que ainda falta categorizar, agrupado, para desenhar
  * regras em lote — descrições mais frequentes (pelas três primeiras palavras,
  * que é onde o banco põe o tipo do lançamento), fornecedores com CNPJ nas
- * saídas e o total de entradas e saídas por mês (para conferir o sinal contra
- * o faturamento). Nome de pessoa física não sai daqui.
+ * saídas, contrapartes (só as duas primeiras palavras do nome), os maiores
+ * lançamentos e o total de entradas e saídas por mês (para conferir o sinal
+ * contra o faturamento).
  */
 async function detalharPendencias() {
   const SEM = sql`${movimentacoesBancarias.categoriaId} is null`;
@@ -52,7 +53,11 @@ async function detalharPendencias() {
     when ${movimentacoesBancarias.contraparteDocumento} is null then 'sem'
     else 'mascarado' end`;
 
-  const [porPrefixo, fornecedores, porMes] = await Promise.all([
+  // Duas primeiras palavras do nome: o bastante para virar regra, sem sobrenome completo.
+  const nome = sql`regexp_replace(trim(coalesce(${movimentacoesBancarias.contraparte}, '')), '[[:space:]]+', ' ', 'g')`;
+  const inicioNome = sql<string>`nullif(lower(trim(concat_ws(' ', split_part(${nome}, ' ', 1), split_part(${nome}, ' ', 2)))), '')`;
+
+  const [porPrefixo, fornecedores, porMes, contrapartes, maiores] = await Promise.all([
     db
       .select({
         inicioDescricao: prefixo,
@@ -89,11 +94,37 @@ async function detalharPendencias() {
       .from(movimentacoesBancarias)
       .groupBy(sql`1`)
       .orderBy(sql`1`),
+    db
+      .select({
+        inicioNome,
+        sentido,
+        documento: tipoDoc,
+        quantidade: sql<number>`count(*)::int`,
+        totalCentavos: sql<string>`sum(${movimentacoesBancarias.valorCentavos})`,
+      })
+      .from(movimentacoesBancarias)
+      .where(SEM)
+      .groupBy(sql`1, 2, 3`)
+      .orderBy(sql`4 desc`)
+      .limit(80),
+    db
+      .select({
+        data: sql<string>`${movimentacoesBancarias.data}::text`,
+        inicioDescricao: prefixo,
+        inicioNome,
+        valorCentavos: movimentacoesBancarias.valorCentavos,
+      })
+      .from(movimentacoesBancarias)
+      .where(SEM)
+      .orderBy(sql`abs(${movimentacoesBancarias.valorCentavos}) desc`)
+      .limit(25),
   ]);
 
   const num = <T extends { totalCentavos: string }>(l: T) => ({ ...l, totalCentavos: Number(l.totalCentavos) });
   return {
     porPrefixo: porPrefixo.map(num),
+    contrapartes: contrapartes.map(num),
+    maiores,
     fornecedores: fornecedores.map(num),
     porMes: porMes.map((m) => ({
       ...m,
