@@ -15,6 +15,20 @@
       "when": 1791220314913,
       "tag": "0001_plano_de_contas",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791476564006,
+      "tag": "0002_regras_mercado_pago",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1791480378505,
+      "tag": "0003_nome_de_exibicao",
+      "breakpoints": true
     }
   ]
 }

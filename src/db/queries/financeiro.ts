@@ -32,13 +32,19 @@ export async function listarRegras() {
       campo: regrasCategorizacao.campo,
       padrao: regrasCategorizacao.padrao,
       sentido: regrasCategorizacao.sentido,
+      nomeExibicao: regrasCategorizacao.nomeExibicao,
+      categoriaId: regrasCategorizacao.categoriaId,
       categoriaNome: categorias.nome,
+      /** Quantas movimentações casam com a regra hoje (inclusive as categorizadas à mão). */
+      lancamentos: sql<number>`(select count(*)::int from ${movimentacoesBancarias} where ${movimentacoesBancarias.regraId} = ${regrasCategorizacao.id})`,
       createdAt: regrasCategorizacao.createdAt,
     })
     .from(regrasCategorizacao)
     .innerJoin(categorias, eq(regrasCategorizacao.categoriaId, categorias.id))
     .orderBy(asc(categorias.nome), asc(regrasCategorizacao.padrao));
 }
+
+export type RegraLinha = Awaited<ReturnType<typeof listarRegras>>[number];
 
 export interface FiltroExtrato {
   contaId?: string;
@@ -63,12 +69,15 @@ export async function listarMovimentacoesDoMes(mes: string, filtro: FiltroExtrat
       categorizadaPor: movimentacoesBancarias.categorizadaPor,
       categoriaNome: categorias.nome,
       categoriaGrupo: categorias.grupo,
+      regraId: movimentacoesBancarias.regraId,
+      nomeExibicao: regrasCategorizacao.nomeExibicao,
       contaNome: contasBancarias.nome,
       contaTipo: contasBancarias.tipo,
     })
     .from(movimentacoesBancarias)
     .innerJoin(contasBancarias, eq(movimentacoesBancarias.contaId, contasBancarias.id))
     .leftJoin(categorias, eq(movimentacoesBancarias.categoriaId, categorias.id))
+    .leftJoin(regrasCategorizacao, eq(movimentacoesBancarias.regraId, regrasCategorizacao.id))
     .where(
       and(
         gte(movimentacoesBancarias.data, inicio),

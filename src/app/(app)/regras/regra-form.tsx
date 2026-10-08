@@ -40,6 +40,15 @@ export function RegraForm({ grupos }: { grupos: { label: string; itens: { id: st
             </optgroup>
           ))}
         </select>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <Input
+          name="nomeExibicao"
+          maxLength={80}
+          placeholder="Mostrar no extrato como… (opcional)"
+          aria-label="Mostrar no extrato como"
+          className="h-9 w-72"
+        />
         <Button type="submit" size="sm" disabled={pendente}>
           {pendente ? "Criando…" : "Criar regra"}
         </Button>

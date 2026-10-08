@@ -176,11 +176,19 @@ export async function salvarCategoriaAction(
   return { ok: id ? "Categoria atualizada." : "Categoria criada." };
 }
 
+/** Vazio vira nulo: sem nome, o extrato mostra a descrição do banco. */
+const nomeExibicao = z
+  .string()
+  .trim()
+  .max(80, "O nome de exibição pode ter até 80 caracteres.")
+  .transform((v) => v || null);
+
 const regraSchema = z.object({
   campo: z.enum(campoRegraEnum.enumValues),
   padrao: z.string().trim().min(3, "O texto da regra precisa de ao menos 3 caracteres."),
   sentido: z.enum(sentidoRegraEnum.enumValues),
   categoriaId: uuid,
+  nomeExibicao,
 });
 
 /**
@@ -196,10 +204,11 @@ export async function criarRegraManualAction(_prev: CategoriaFormState, formData
     padrao: formData.get("padrao") ?? "",
     sentido: formData.get("sentido"),
     categoriaId: formData.get("categoriaId"),
+    nomeExibicao: formData.get("nomeExibicao") ?? "",
   });
   if (!parsed.success) return { erro: parsed.error.issues[0]?.message ?? "Dados inválidos." };
 
-  const { campo, sentido, categoriaId } = parsed.data;
+  const { campo, sentido, categoriaId, nomeExibicao } = parsed.data;
   // Mesma normalização que a comparação usa, senão a regra nunca casa.
   const padrao = campo === "documento" ? parsed.data.padrao.replace(/\D/g, "") : normalizarTexto(parsed.data.padrao);
   if (campo === "documento" && !/^(\d{11}|\d{14})$/.test(padrao)) {
@@ -208,13 +217,55 @@ export async function criarRegraManualAction(_prev: CategoriaFormState, formData
 
   await db
     .insert(regrasCategorizacao)
-    .values({ campo, padrao, sentido, categoriaId })
+    .values({ campo, padrao, sentido, categoriaId, nomeExibicao })
     .onConflictDoUpdate({
       target: [regrasCategorizacao.campo, regrasCategorizacao.padrao, regrasCategorizacao.sentido],
-      set: { categoriaId },
+      // Regra que já existia: nome em branco aqui não apaga o que estava lá.
+      set: nomeExibicao ? { categoriaId, nomeExibicao } : { categoriaId },
     });
 
   const alteradas = await aplicarRegras();
   revalidarTudo();
   return { ok: `Regra criada. ${alteradas} movimentação(ões) categorizada(s).` };
+}
+
+const edicaoRegraSchema = z.object({ id: uuid, categoriaId: uuid, nomeExibicao });
+
+/**
+ * Edição feita na tela de regras: categoria e nome de exibição. Trocar o
+ * nome não precisa reaplicar nada (o extrato lê o nome da regra); trocar a
+ * categoria recategoriza o que a regra pega, menos o que foi escolhido à mão.
+ */
+export async function atualizarRegraAction(
+  id: string,
+  categoriaId: string,
+  nome: string
+): Promise<{ erro?: string; alteradas?: number }> {
+  if (!(await obterSessao())) return { erro: "Sessão expirada." };
+  const parsed = edicaoRegraSchema.safeParse({ id, categoriaId, nomeExibicao: nome });
+  if (!parsed.success) return { erro: parsed.error.issues[0]?.message ?? "Dados inválidos." };
+
+  const [antes] = await db
+    .select({ categoriaId: regrasCategorizacao.categoriaId })
+    .from(regrasCategorizacao)
+    .where(eq(regrasCategorizacao.id, parsed.data.id))
+    .limit(1);
+  if (!antes) return { erro: "Regra não encontrada." };
+
+  await db
+    .update(regrasCategorizacao)
+    .set({ categoriaId: parsed.data.categoriaId, nomeExibicao: parsed.data.nomeExibicao })
+    .where(eq(regrasCategorizacao.id, parsed.data.id));
+
+  const alteradas = antes.categoriaId === parsed.data.categoriaId ? 0 : await aplicarRegras();
+  revalidarTudo();
+  return { alteradas };
+}
+
+/** Roda as regras sobre todo o extrato sem esperar o sync. */
+export async function aplicarRegrasAction(): Promise<{ erro?: string; alteradas?: number }> {
+  if (!(await obterSessao())) return { erro: "Sessão expirada." };
+  const alteradas = await aplicarRegras();
+  revalidarTudo();
+  return { alteradas };
 }

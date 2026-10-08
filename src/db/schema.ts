@@ -71,6 +71,8 @@ export const regrasCategorizacao = pgTable(
     /** Documento: só dígitos, igualdade. Texto: trecho, sem acento nem caixa. */
     padrao: text("padrao").notNull(),
     sentido: sentidoRegraEnum("sentido").notNull().default("ambos"),
+    /** Como o extrato mostra o que casa com a regra ("José (cozinha)"). Nulo = a descrição do banco. */
+    nomeExibicao: text("nome_exibicao"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [unique("regra_campo_padrao_sentido_unq").on(t.campo, t.padrao, t.sentido)]
@@ -147,6 +149,11 @@ export const movimentacoesBancarias = pgTable(
     categoriaId: uuid("categoria_id").references(() => categorias.id, { onDelete: "set null" }),
     /** `manual` nunca é mexida por regra. Nulo = sem categoria. */
     categorizadaPor: origemCategoriaEnum("categorizada_por"),
+    /**
+     * A regra que casa com a linha, mesmo quando a categoria foi escolhida à
+     * mão: é dela que vem o nome de exibição. Gravada por aplicarRegras.
+     */
+    regraId: uuid("regra_id").references(() => regrasCategorizacao.id, { onDelete: "set null" }),
     payloadBruto: jsonb("payload_bruto"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -155,6 +162,7 @@ export const movimentacoesBancarias = pgTable(
     index("movimentacao_conta_data_idx").on(t.contaId, t.data),
     index("movimentacao_data_idx").on(t.data),
     index("movimentacao_categoria_idx").on(t.categoriaId),
+    index("movimentacao_regra_idx").on(t.regraId),
   ]
 );
 

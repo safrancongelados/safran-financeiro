@@ -13,7 +13,10 @@ contas próprias da Safran (GitHub, Vercel, Supabase, Pluggy).
 2. **Categorização** — cada movimentação recebe uma categoria do plano de
    contas. Ao escolher uma, o sistema oferece *aplicar a todas* da mesma
    contraparte: isso vira uma regra, que vale para o passado e para o que
-   chegar depois. Escolha manual nunca é mudada por regra.
+   chegar depois. Escolha manual nunca é mudada por regra. Em **Regras**
+   (`/regras`) dá para editar a categoria de cada regra e um *nome de
+   exibição* ("Pix enviado José Wyvinnes…" aparece como "José (cozinha)"),
+   e rodar as regras na hora (*Aplicar regras agora*).
 3. **DRE** (`/dre`) — regime de caixa, mês a mês:
    receita bruta − deduções = receita líquida − custos variáveis =
    **margem de contribuição** − despesas fixas = resultado operacional ±

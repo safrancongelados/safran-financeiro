@@ -278,7 +278,9 @@ export default async function ExtratoPage({ searchParams }: PageProps<"/extrato"
                     {DATA.format(new Date(`${l.data}T00:00:00Z`))}
                   </TableCell>
                   <TableCell className="max-w-64 whitespace-normal">
-                    <p className="text-foreground">{l.descricao}</p>
+                    <p className="text-foreground">{l.nomeExibicao ?? l.descricao}</p>
+                    {/* Renomeada por regra: a descrição do banco fica embaixo, para conferência. */}
+                    {l.nomeExibicao ? <p className="text-xs text-muted-foreground">{l.descricao}</p> : null}
                     <div className="mt-0.5 flex flex-wrap items-center gap-1">
                       {l.meio ? <Badge variant="secondary">{l.meio}</Badge> : null}
                       {l.contaTipo === "CREDIT" ? <Badge variant="sky">Cartão</Badge> : null}
@@ -301,6 +303,7 @@ export default async function ExtratoPage({ searchParams }: PageProps<"/extrato"
                       categoriaId={l.categoriaId}
                       categoriaNome={l.categoriaNome}
                       automatica={l.categorizadaPor === "regra"}
+                      regraId={l.regraId}
                       opcoes={opcoes}
                     />
                   </TableCell>

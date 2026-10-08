@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { toast } from "sonner";
 import { categorizarAction, criarRegraAction } from "@/actions/categorias";
 import { cn } from "@/lib/utils";
@@ -24,12 +25,15 @@ export function CategoriaSelect({
   categoriaId,
   categoriaNome,
   automatica,
+  regraId,
   opcoes,
 }: {
   movimentacaoId: string;
   categoriaId: string | null;
   categoriaNome: string | null;
   automatica: boolean;
+  /** Regra que casa com a linha; o selo "auto" leva até ela. */
+  regraId: string | null;
   opcoes: GrupoOpcoes[];
 }) {
   const [valor, setValor] = useState(categoriaId ?? "");
@@ -88,9 +92,19 @@ export function CategoriaSelect({
         ))}
       </select>
       {automatica && valor === categoriaId ? (
-        <span title="Categorizada por regra" className="text-[10px] font-semibold uppercase text-muted-foreground">
-          auto
-        </span>
+        regraId ? (
+          <Link
+            href={`/regras#regra-${regraId}`}
+            title="Categorizada por regra — editar a regra"
+            className="text-[10px] font-semibold uppercase text-muted-foreground underline-offset-2 hover:underline"
+          >
+            auto
+          </Link>
+        ) : (
+          <span title="Categorizada por regra" className="text-[10px] font-semibold uppercase text-muted-foreground">
+            auto
+          </span>
+        )
       ) : null}
     </div>
   );
