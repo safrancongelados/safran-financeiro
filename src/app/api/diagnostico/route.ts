@@ -57,7 +57,29 @@ async function detalharPendencias() {
   const nome = sql`regexp_replace(trim(coalesce(${movimentacoesBancarias.contraparte}, '')), '[[:space:]]+', ' ', 'g')`;
   const inicioNome = sql<string>`nullif(lower(trim(concat_ws(' ', split_part(${nome}, ' ', 1), split_part(${nome}, ' ', 2)))), '')`;
 
-  const [porPrefixo, fornecedores, porMes, contrapartes, maiores] = await Promise.all([
+  // Quando as três primeiras palavras são só o tipo do lançamento ("transferência
+  // pix enviada"), o nome de quem recebeu vem depois: abre até a quinta.
+  const prefixoLongo = sql<string>`lower(trim(concat_ws(' ', ${sql.join(
+    [1, 2, 3, 4, 5].map((n) => sql`split_part(${normalizada}, ' ', ${sql.raw(String(n))})`),
+    sql`, `
+  )})))`;
+  const GENERICOS = [
+    "pix enviado",
+    "pix recebido",
+    "transferência pix",
+    "transferência enviada",
+    "transferência cancelada",
+    "transferência recebida",
+    "pagamento com",
+    "pagamento de",
+    "compra de",
+  ];
+  const ehGenerico = sql`(${sql.join(
+    GENERICOS.map((g) => sql`lower(${normalizada}) like ${g + " %"}`),
+    sql` or `
+  )})`;
+
+  const [porPrefixo, fornecedores, porMes, contrapartes, maiores, genericos] = await Promise.all([
     db
       .select({
         inicioDescricao: prefixo,
@@ -118,12 +140,25 @@ async function detalharPendencias() {
       .where(SEM)
       .orderBy(sql`abs(${movimentacoesBancarias.valorCentavos}) desc`)
       .limit(25),
+    db
+      .select({
+        descricao: prefixoLongo,
+        sentido,
+        quantidade: sql<number>`count(*)::int`,
+        totalCentavos: sql<string>`sum(${movimentacoesBancarias.valorCentavos})`,
+      })
+      .from(movimentacoesBancarias)
+      .where(sql`${SEM} and ${ehGenerico}`)
+      .groupBy(sql`1, 2`)
+      .orderBy(sql`3 desc`)
+      .limit(120),
   ]);
 
   const num = <T extends { totalCentavos: string }>(l: T) => ({ ...l, totalCentavos: Number(l.totalCentavos) });
   return {
     porPrefixo: porPrefixo.map(num),
     contrapartes: contrapartes.map(num),
+    genericos: genericos.map(num),
     maiores,
     fornecedores: fornecedores.map(num),
     porMes: porMes.map((m) => ({
