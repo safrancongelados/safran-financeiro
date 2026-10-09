@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
-import { asc, sql } from "drizzle-orm";
+import { and, asc, eq, gte, lt, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { buscarContas, buscarItem, PluggyErro } from "@/lib/pluggy/client";
 import { categoriasParaDre, listarLinhasDre, somasPorMesECategoria } from "@/db/queries/financeiro";
 import { montarDre } from "@/lib/dre";
-import { deslocarMes, mesValido } from "@/lib/periodo";
+import { deslocarMes, intervaloDoMes, mesValido } from "@/lib/periodo";
+import { regraAPartirDe, sentidoDe } from "@/lib/regras";
 import {
   categorias,
   conexoesBancarias,
@@ -31,6 +32,9 @@ export const maxDuration = 30;
  *
  * Com `&dre=YYYY-MM`, inclui a DRE daquele mês: total por linha e por
  * categoria, na estrutura configurada (só números).
+ *
+ * Com `&nomes=YYYY-MM`, lista os nomes únicos do mês, agrupados pelas
+ * mesmas "iguais" que a edição do extrato usa (para renomear em lote).
  *
  * Com `&item=<id>`, pergunta também à Pluggy se as credenciais da Safran
  * enxergam aquela conexão (só leitura, nada é gravado). Serve para saber se
@@ -198,6 +202,66 @@ async function resumirDre(mes: string) {
   };
 }
 
+/**
+ * Com `&nomes=YYYY-MM`: um item por grupo de linhas iguais (mesmo CPF/CNPJ,
+ * senão contraparte, senão descrição, no mesmo sentido), com a descrição
+ * mais frequente, o nome de exibição atual e uma movimentação de exemplo —
+ * o id dela basta para renomear o grupo inteiro depois.
+ */
+async function nomesDoMes(mes: string) {
+  const { inicio, fim } = intervaloDoMes(mes);
+  const movs = await db
+    .select({
+      id: movimentacoesBancarias.id,
+      valorCentavos: movimentacoesBancarias.valorCentavos,
+      contraparte: movimentacoesBancarias.contraparte,
+      contraparteDocumento: movimentacoesBancarias.contraparteDocumento,
+      descricao: movimentacoesBancarias.descricao,
+      nomeExibicao: movimentacoesBancarias.nomeExibicao,
+      categoria: categorias.nome,
+    })
+    .from(movimentacoesBancarias)
+    .leftJoin(categorias, eq(movimentacoesBancarias.categoriaId, categorias.id))
+    .where(and(gte(movimentacoesBancarias.data, inicio), lt(movimentacoesBancarias.data, fim)))
+    .orderBy(asc(movimentacoesBancarias.data));
+
+  const grupos = new Map<
+    string,
+    { exemploId: string; sentido: string; quantidade: number; totalCentavos: number; descricoes: Map<string, number>; nomeExibicao: string | null; categoria: string | null }
+  >();
+  for (const m of movs) {
+    const id = regraAPartirDe(m);
+    const chave = id ? `${id.campo}|${id.padrao}|${id.sentido}` : `linha|${m.id}`;
+    const g = grupos.get(chave) ?? {
+      exemploId: m.id,
+      sentido: sentidoDe(m.valorCentavos),
+      quantidade: 0,
+      totalCentavos: 0,
+      descricoes: new Map<string, number>(),
+      nomeExibicao: null,
+      categoria: null,
+    };
+    g.quantidade += 1;
+    g.totalCentavos += m.valorCentavos;
+    g.descricoes.set(m.descricao, (g.descricoes.get(m.descricao) ?? 0) + 1);
+    g.nomeExibicao ??= m.nomeExibicao;
+    g.categoria ??= m.categoria;
+    grupos.set(chave, g);
+  }
+
+  return [...grupos.values()]
+    .map((g) => ({
+      exemploId: g.exemploId,
+      sentido: g.sentido,
+      descricao: [...g.descricoes.entries()].sort((a, b) => b[1] - a[1])[0][0],
+      nomeExibicao: g.nomeExibicao,
+      categoria: g.categoria,
+      quantidade: g.quantidade,
+      totalCentavos: g.totalCentavos,
+    }))
+    .sort((a, b) => a.sentido.localeCompare(b.sentido) * -1 || b.quantidade - a.quantidade || a.descricao.localeCompare(b.descricao));
+}
+
 async function testarItemNaPluggy(itemId: string) {
   try {
     const item = await buscarItem(itemId);
@@ -278,11 +342,14 @@ export async function GET(request: Request) {
     const detalhe = new URL(request.url).searchParams.get("detalhe") === "1" ? await detalharPendencias() : undefined;
     const mesDre = new URL(request.url).searchParams.get("dre");
     const dre = mesDre && mesValido(mesDre) ? await resumirDre(mesDre) : undefined;
+    const mesNomes = new URL(request.url).searchParams.get("nomes");
+    const nomes = mesNomes && mesValido(mesNomes) ? await nomesDoMes(mesNomes) : undefined;
 
     return NextResponse.json({
       ...(pluggy ? { pluggy } : {}),
       ...(detalhe ? { detalhe } : {}),
       ...(dre ? { dre } : {}),
+      ...(nomes ? { nomes } : {}),
       banco: { ok: true, latenciaMs },
       conexoes,
       contas,
