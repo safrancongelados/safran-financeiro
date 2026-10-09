@@ -29,6 +29,13 @@
       "when": 1791480378505,
       "tag": "0003_nome_de_exibicao",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1791541309283,
+      "tag": "0004_dre_configuravel",
+      "breakpoints": true
     }
   ]
 }

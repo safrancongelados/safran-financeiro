@@ -1,12 +1,16 @@
 /**
  * Motor de categorização automática. Sem I/O: decide, para uma movimentação,
- * qual regra vale — é aqui que mora a ordem de precedência.
+ * de qual regra vem a categoria, o nome de exibição e o centro de custo — é
+ * aqui que mora a ordem de precedência.
  */
 import type { CampoRegra, SentidoRegra } from "@/db/schema";
 
 export interface RegraAplicavel {
   id: string;
-  categoriaId: string;
+  /** Cada um destes é opcional: uma regra pode só dar nome, por exemplo. */
+  categoriaId: string | null;
+  nomeExibicao: string | null;
+  centroCustoId: string | null;
   campo: CampoRegra;
   padrao: string;
   sentido: SentidoRegra;
@@ -66,15 +70,37 @@ export function ordenarRegras<R extends RegraAplicavel>(regras: R[]): R[] {
   );
 }
 
-/** Recebe as regras já ordenadas (`ordenarRegras`), para não reordenar a cada linha. */
-export function escolherRegra<R extends RegraAplicavel>(mov: MovimentacaoParaRegra, regrasOrdenadas: R[]): R | null {
-  return regrasOrdenadas.find((r) => regraCasa(r, mov)) ?? null;
+export interface Resolucao<R> {
+  categoria: R | null;
+  nome: R | null;
+  centro: R | null;
 }
 
 /**
- * A regra que "aplicar a todas desta contraparte" cria a partir de uma
- * movimentação. Vale só no mesmo sentido: o mesmo fornecedor pode devolver
- * dinheiro, e devolução não é despesa.
+ * Cada atributo vem da primeira regra, na ordem de precedência, que casa com
+ * a movimentação e define aquele atributo. Assim "Pix enviado José…" pode ter
+ * o nome de uma regra da pessoa e a categoria de uma regra mais geral.
+ *
+ * Recebe as regras já ordenadas (`ordenarRegras`), para não reordenar a cada linha.
+ */
+export function resolverRegras<R extends RegraAplicavel>(mov: MovimentacaoParaRegra, regrasOrdenadas: R[]): Resolucao<R> {
+  const r: Resolucao<R> = { categoria: null, nome: null, centro: null };
+  for (const regra of regrasOrdenadas) {
+    if (r.categoria && r.nome && r.centro) break;
+    if (!regraCasa(regra, mov)) continue;
+    if (!r.categoria && regra.categoriaId) r.categoria = regra;
+    if (!r.nome && regra.nomeExibicao) r.nome = regra;
+    if (!r.centro && regra.centroCustoId) r.centro = regra;
+  }
+  return r;
+}
+
+/**
+ * A identidade de uma movimentação: o que faz outra linha ser "igual" a ela.
+ * Editar nome, categoria ou centro no extrato grava numa regra com esta
+ * identidade, que vale para as iguais — passadas e futuras. CPF/CNPJ completo
+ * primeiro, depois contraparte, depois a descrição inteira. Vale só no mesmo
+ * sentido: o mesmo fornecedor pode devolver dinheiro, e devolução não é despesa.
  */
 export function regraAPartirDe(
   mov: MovimentacaoParaRegra

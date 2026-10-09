@@ -1,15 +1,16 @@
 "use client";
 
 import { useActionState } from "react";
-import { criarRegraManualAction, type CategoriaFormState } from "@/actions/categorias";
+import { criarRegraManualAction, type RegraFormState } from "@/actions/categorias";
+import type { GrupoOpcoes, OpcaoCentro } from "@/lib/opcoes";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 const SELECT =
   "h-9 rounded-md border border-input bg-card px-2 text-sm shadow-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/20";
 
-export function RegraForm({ grupos }: { grupos: { label: string; itens: { id: string; nome: string }[] }[] }) {
-  const [state, formAction, pendente] = useActionState<CategoriaFormState, FormData>(criarRegraManualAction, {});
+export function RegraForm({ grupos, centros }: { grupos: GrupoOpcoes[]; centros: OpcaoCentro[] }) {
+  const [state, formAction, pendente] = useActionState<RegraFormState, FormData>(criarRegraManualAction, {});
 
   return (
     <form action={formAction} className="space-y-2">
@@ -25,11 +26,11 @@ export function RegraForm({ grupos }: { grupos: { label: string; itens: { id: st
           <option value="saida">nas saídas</option>
           <option value="ambos">nas duas</option>
         </select>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
         <span className="text-sm text-muted-foreground">→</span>
-        <select name="categoriaId" required defaultValue="" aria-label="Categoria" className={SELECT}>
-          <option value="" disabled>
-            Categoria…
-          </option>
+        <select name="categoriaId" defaultValue="" aria-label="Categoria" className={SELECT}>
+          <option value="">Categoria: não decide</option>
           {grupos.map((g) => (
             <optgroup key={g.label} label={g.label}>
               {g.itens.map((i) => (
@@ -40,15 +41,23 @@ export function RegraForm({ grupos }: { grupos: { label: string; itens: { id: st
             </optgroup>
           ))}
         </select>
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
         <Input
           name="nomeExibicao"
           maxLength={80}
           placeholder="Mostrar no extrato como… (opcional)"
           aria-label="Mostrar no extrato como"
-          className="h-9 w-72"
+          className="h-9 w-64"
         />
+        {centros.length > 0 ? (
+          <select name="centroCustoId" defaultValue="" aria-label="Centro de custo" className={SELECT}>
+            <option value="">Centro: padrão da categoria</option>
+            {centros.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.nome}
+              </option>
+            ))}
+          </select>
+        ) : null}
         <Button type="submit" size="sm" disabled={pendente}>
           {pendente ? "Criando…" : "Criar regra"}
         </Button>

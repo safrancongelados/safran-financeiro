@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { asc, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { buscarContas, buscarItem, PluggyErro } from "@/lib/pluggy/client";
+import { categoriasParaDre, listarLinhasDre, somasPorMesECategoria } from "@/db/queries/financeiro";
+import { montarDre } from "@/lib/dre";
+import { deslocarMes, mesValido } from "@/lib/periodo";
 import {
   categorias,
   conexoesBancarias,
@@ -25,6 +28,9 @@ export const maxDuration = 30;
  * Com `&detalhe=1`, inclui o que falta categorizar agrupado (ver
  * detalharPendencias) — esse modo traz totais em reais e nomes de
  * contrapartes.
+ *
+ * Com `&dre=YYYY-MM`, inclui a DRE daquele mês: total por linha e por
+ * categoria, na estrutura configurada (só números).
  *
  * Com `&item=<id>`, pergunta também à Pluggy se as credenciais da Safran
  * enxergam aquela conexão (só leitura, nada é gravado). Serve para saber se
@@ -169,6 +175,29 @@ async function detalharPendencias() {
   };
 }
 
+/** Com `&dre=YYYY-MM`: total por linha e por categoria do mês, como a tela da DRE monta. */
+async function resumirDre(mes: string) {
+  const [linhas, categorias, somas] = await Promise.all([
+    listarLinhasDre(),
+    categoriasParaDre(),
+    somasPorMesECategoria(`${mes}-01`, `${deslocarMes(mes, 1)}-01`),
+  ]);
+  const dre = montarDre([mes], linhas, categorias, somas);
+  return {
+    mes,
+    linhas: dre.linhas.map((l) => ({
+      linha: l.linha.nome,
+      tipo: l.linha.tipo,
+      secao: l.linha.secao,
+      totalCentavos: l.total,
+      categorias: l.categorias.map((c) => ({ categoria: c.categoria.nome, totalCentavos: c.total })),
+    })),
+    resultadoCentavos: dre.resultado.total,
+    semCategoriaCentavos: dre.semCategoria.total,
+    variacaoCaixaCentavos: dre.variacaoCaixa.total,
+  };
+}
+
 async function testarItemNaPluggy(itemId: string) {
   try {
     const item = await buscarItem(itemId);
@@ -247,10 +276,13 @@ export async function GET(request: Request) {
     ]);
 
     const detalhe = new URL(request.url).searchParams.get("detalhe") === "1" ? await detalharPendencias() : undefined;
+    const mesDre = new URL(request.url).searchParams.get("dre");
+    const dre = mesDre && mesValido(mesDre) ? await resumirDre(mesDre) : undefined;
 
     return NextResponse.json({
       ...(pluggy ? { pluggy } : {}),
       ...(detalhe ? { detalhe } : {}),
+      ...(dre ? { dre } : {}),
       banco: { ok: true, latenciaMs },
       conexoes,
       contas,

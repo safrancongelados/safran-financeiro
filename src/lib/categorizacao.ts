@@ -4,28 +4,37 @@
  */
 import { and, eq, inArray, isNull, or } from "drizzle-orm";
 import { db } from "@/db";
-import { movimentacoesBancarias, regrasCategorizacao } from "@/db/schema";
+import { categorias, movimentacoesBancarias, regrasCategorizacao } from "@/db/schema";
 import { codigoPostgres } from "./db-erros";
-import { escolherRegra, ordenarRegras } from "./regras";
+import { ordenarRegras, resolverRegras } from "./regras";
 
 const LOTE = 1000;
 
-function agrupar(mapa: Map<string | null, string[]>, chave: string | null, id: string) {
-  const ids = mapa.get(chave) ?? [];
-  ids.push(id);
-  mapa.set(chave, ids);
+function agrupar<K>(mapa: Map<string, { chave: K; ids: string[] }>, chave: K, id: string) {
+  const k = JSON.stringify(chave);
+  const grupo = mapa.get(k) ?? { chave, ids: [] };
+  grupo.ids.push(id);
+  mapa.set(k, grupo);
 }
 
 /**
- * Recalcula, para toda movimentação, qual regra casa com ela (de onde vem o
- * nome de exibição) e, nas que não foram categorizadas à mão, a categoria.
- * Roda depois de cada sync e sempre que uma regra nasce, muda ou é apagada,
- * então uma regra nova vale também para o passado.
+ * Recalcula, para toda movimentação:
+ * - a categoria, nas que não foram categorizadas à mão;
+ * - o nome de exibição e o centro de custo, em todas — o centro vem da
+ *   exceção de uma regra ou, sem exceção, do padrão da categoria.
+ *
+ * Roda depois de cada sync, no build e sempre que uma regra, categoria ou
+ * centro muda, então uma mudança vale também para o passado.
  *
  * Devolve quantas linhas mudaram de categoria.
  */
 export async function aplicarRegras(): Promise<number> {
-  const regras = ordenarRegras(await db.select().from(regrasCategorizacao));
+  const [regras, cats] = await Promise.all([
+    db.select().from(regrasCategorizacao),
+    db.select({ id: categorias.id, centroCustoId: categorias.centroCustoId }).from(categorias),
+  ]);
+  const ordenadas = ordenarRegras(regras);
+  const centroPadrao = new Map(cats.map((c) => [c.id, c.centroCustoId]));
 
   const movimentacoes = await db
     .select({
@@ -37,36 +46,45 @@ export async function aplicarRegras(): Promise<number> {
       categoriaId: movimentacoesBancarias.categoriaId,
       categorizadaPor: movimentacoesBancarias.categorizadaPor,
       regraId: movimentacoesBancarias.regraId,
+      nomeExibicao: movimentacoesBancarias.nomeExibicao,
+      centroCustoId: movimentacoesBancarias.centroCustoId,
     })
     .from(movimentacoesBancarias);
 
   // Agrupa por destino para gravar com um UPDATE por grupo, não por linha.
-  const porRegra = new Map<string | null, string[]>();
-  const porCategoria = new Map<string | null, string[]>();
+  const porCategoria = new Map<string, { chave: string | null; ids: string[] }>();
+  const porDetalhe = new Map<string, { chave: [string | null, string | null, string | null]; ids: string[] }>();
   for (const mov of movimentacoes) {
-    const regra = escolherRegra(mov, regras);
-    if ((regra?.id ?? null) !== mov.regraId) agrupar(porRegra, regra?.id ?? null, mov.id);
-    // Categoria escolhida à mão fica; só o nome de exibição acompanha a regra.
-    if (mov.categorizadaPor === "manual") continue;
-    if ((regra?.categoriaId ?? null) !== mov.categoriaId) agrupar(porCategoria, regra?.categoriaId ?? null, mov.id);
+    const r = resolverRegras(mov, ordenadas);
+    // Categoria escolhida à mão fica; nome e centro continuam vindo das regras.
+    const manual = mov.categorizadaPor === "manual";
+    const categoriaId = manual ? mov.categoriaId : (r.categoria?.categoriaId ?? null);
+    const regraId = manual ? null : (r.categoria?.id ?? null);
+    const nome = r.nome?.nomeExibicao ?? null;
+    const centro = r.centro?.centroCustoId ?? (categoriaId ? (centroPadrao.get(categoriaId) ?? null) : null);
+
+    if (!manual && categoriaId !== mov.categoriaId) agrupar(porCategoria, categoriaId, mov.id);
+    if (regraId !== mov.regraId || nome !== mov.nomeExibicao || centro !== mov.centroCustoId) {
+      agrupar(porDetalhe, [regraId, nome, centro], mov.id);
+    }
   }
 
-  for (const [regraId, ids] of porRegra) {
+  for (const { chave: [regraId, nomeExibicao, centroCustoId], ids } of porDetalhe.values()) {
     for (let i = 0; i < ids.length; i += LOTE) {
       try {
         await db
           .update(movimentacoesBancarias)
-          .set({ regraId })
+          .set({ regraId, nomeExibicao, centroCustoId })
           .where(inArray(movimentacoesBancarias.id, ids.slice(i, i + LOTE)));
       } catch (err) {
-        // A regra foi apagada enquanto isto rodava; quem apagou roda de novo.
+        // A regra ou o centro foi apagado enquanto isto rodava; quem apagou roda de novo.
         if (codigoPostgres(err) !== "23503") throw err;
       }
     }
   }
 
   let alteradas = 0;
-  for (const [categoriaId, ids] of porCategoria) {
+  for (const { chave: categoriaId, ids } of porCategoria.values()) {
     for (let i = 0; i < ids.length; i += LOTE) {
       const lote = ids.slice(i, i + LOTE);
       await db

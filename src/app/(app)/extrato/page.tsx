@@ -1,9 +1,15 @@
 import Link from "next/link";
 import { ArrowDownLeft, ArrowUpRight, ChevronLeft, ChevronRight, Landmark, Tags, Wallet, X } from "lucide-react";
-import { listarCategorias, listarConexoesComContas, listarMovimentacoesDoMes } from "@/db/queries/financeiro";
+import {
+  listarCategorias,
+  listarCentrosCusto,
+  listarConexoesComContas,
+  listarLinhasDre,
+  listarMovimentacoesDoMes,
+} from "@/db/queries/financeiro";
 import { formatarCentavos } from "@/lib/dinheiro";
 import { formatarDocumento, statusConexao, TIPO_CONTA_LABEL } from "@/lib/extrato";
-import { GRUPOS } from "@/lib/grupos";
+import { opcoesDeCategoria, opcoesDeCentro } from "@/lib/opcoes";
 import { deslocarMes, mesAtual, mesValido, rotuloMes } from "@/lib/periodo";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -15,7 +21,7 @@ import { cn } from "@/lib/utils";
 import { SincronizarButton } from "./sincronizar-button";
 import { ConectarBancoForm } from "./conectar-form";
 import { ConectarBancoButton } from "./conectar-banco";
-import { CategoriaSelect, type GrupoOpcoes } from "./categoria-select";
+import { CategoriaSelect, CentroSelect, NomeEditavel } from "./edicao-linha";
 
 export const dynamic = "force-dynamic";
 // As actions desta página rodam o sync, que chama a Pluggy conta por conta.
@@ -110,22 +116,22 @@ export default async function ExtratoPage({ searchParams }: PageProps<"/extrato"
     );
   }
 
-  const [linhas, categorias] = await Promise.all([
+  const [linhas, categorias, linhasDre, centros] = await Promise.all([
     listarMovimentacoesDoMes(mes, { contaId, categoriaId, semCategoria }),
     listarCategorias(),
+    listarLinhasDre(),
+    listarCentrosCusto(),
   ]);
   const contas = conexoes.flatMap((c) => c.contas);
   const categoriaFiltrada = categoriaId ? categorias.find((c) => c.id === categoriaId) : undefined;
 
-  const opcoes: GrupoOpcoes[] = GRUPOS.map((g) => ({
-    label: g.label,
-    itens: categorias.filter((c) => c.ativa && c.grupo === g.id).map((c) => ({ id: c.id, nome: c.nome })),
-  })).filter((g) => g.itens.length > 0);
+  const opcoes = opcoesDeCategoria(linhasDre, categorias);
+  const opcoesCentro = opcoesDeCentro(centros);
 
   const saldoEmConta = contas.filter((c) => c.tipo === "BANK").reduce((acc, c) => acc + c.saldoCentavos, 0);
   // Entradas e saídas do caixa: só contas (não cartão) e sem transferência
   // entre contas da própria Safran, que entraria duas vezes.
-  const doCaixa = linhas.filter((l) => l.contaTipo === "BANK" && l.categoriaGrupo !== "transferencia");
+  const doCaixa = linhas.filter((l) => l.contaTipo === "BANK" && l.categoriaSecao !== "transferencia");
   const entradas = doCaixa.filter((l) => l.valorCentavos > 0).reduce((acc, l) => acc + l.valorCentavos, 0);
   const saidas = doCaixa.filter((l) => l.valorCentavos < 0).reduce((acc, l) => acc + l.valorCentavos, 0);
   const pendentes = linhas.filter((l) => !l.categoriaId).length;
@@ -265,9 +271,9 @@ export default async function ExtratoPage({ searchParams }: PageProps<"/extrato"
             <TableHeader>
               <TableRow>
                 <TableHead>Data</TableHead>
-                <TableHead>Descrição</TableHead>
+                <TableHead>Nome</TableHead>
                 <TableHead>Contraparte</TableHead>
-                <TableHead>Categoria</TableHead>
+                <TableHead>Categoria e centro</TableHead>
                 <TableHead className="text-right">Valor</TableHead>
               </TableRow>
             </TableHeader>
@@ -278,9 +284,13 @@ export default async function ExtratoPage({ searchParams }: PageProps<"/extrato"
                     {DATA.format(new Date(`${l.data}T00:00:00Z`))}
                   </TableCell>
                   <TableCell className="max-w-64 whitespace-normal">
-                    <p className="text-foreground">{l.nomeExibicao ?? l.descricao}</p>
-                    {/* Renomeada por regra: a descrição do banco fica embaixo, para conferência. */}
-                    {l.nomeExibicao ? <p className="text-xs text-muted-foreground">{l.descricao}</p> : null}
+                    <NomeEditavel
+                      // Remonta quando a edição de uma linha igual renomeia esta no servidor.
+                      key={`${l.id}-${l.nomeExibicao ?? ""}`}
+                      movimentacaoId={l.id}
+                      descricao={l.descricao}
+                      nomeExibicao={l.nomeExibicao}
+                    />
                     <div className="mt-0.5 flex flex-wrap items-center gap-1">
                       {l.meio ? <Badge variant="secondary">{l.meio}</Badge> : null}
                       {l.contaTipo === "CREDIT" ? <Badge variant="sky">Cartão</Badge> : null}
@@ -295,17 +305,26 @@ export default async function ExtratoPage({ searchParams }: PageProps<"/extrato"
                   </TableCell>
                   <TableCell>
                     <CategoriaSelect
-                      // A chave muda junto com a categoria: quando uma regra
-                      // recategoriza a linha no servidor, o seletor remonta
-                      // com o valor novo em vez de manter o antigo.
-                      key={`${l.id}-${l.categoriaId ?? "sem"}`}
+                      // A chave muda junto com a categoria: quando a edição de
+                      // uma linha igual recategoriza esta no servidor, o
+                      // seletor remonta com o valor novo em vez de manter o antigo.
+                      key={`${l.id}-${l.categoriaId ?? "sem"}-${l.categorizadaPor ?? ""}`}
                       movimentacaoId={l.id}
                       categoriaId={l.categoriaId}
                       categoriaNome={l.categoriaNome}
-                      automatica={l.categorizadaPor === "regra"}
+                      origem={l.categorizadaPor}
                       regraId={l.regraId}
                       opcoes={opcoes}
                     />
+                    {l.categoriaId ? (
+                      <CentroSelect
+                        key={`${l.id}-${l.centroCustoId ?? ""}-${l.categoriaCentroId ?? ""}`}
+                        movimentacaoId={l.id}
+                        centroId={l.centroCustoId}
+                        centroPadraoId={l.categoriaCentroId}
+                        centros={opcoesCentro}
+                      />
+                    ) : null}
                   </TableCell>
                   <TableCell
                     className={cn(

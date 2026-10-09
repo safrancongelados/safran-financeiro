@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BarChart3, Landmark, ListFilter, ListTree, LogOut, Menu, Receipt, KeyRound, X } from "lucide-react";
+import { BarChart3, Landmark, LogOut, Menu, Receipt, KeyRound, Settings, X } from "lucide-react";
 import { logoutAction } from "@/actions/auth";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -12,8 +12,7 @@ const LINKS = [
   { href: "/dre", label: "DRE", icon: BarChart3 },
   { href: "/fluxo-de-caixa", label: "Fluxo de caixa", icon: Landmark },
   { href: "/extrato", label: "Extrato", icon: Receipt },
-  { href: "/regras", label: "Regras", icon: ListFilter },
-  { href: "/plano-de-contas", label: "Plano de contas", icon: ListTree },
+  { href: "/configuracoes", label: "Configurações", icon: Settings },
 ];
 
 function Brand() {

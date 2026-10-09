@@ -10,20 +10,24 @@ contas próprias da Safran (GitHub, Vercel, Supabase, Pluggy).
 1. **Extrato** (`/extrato`) — a conta é conectada pelo widget da Pluggy
    (*Conectar banco*) e sincronizada todo dia às 07:00 (Maceió), a cada aviso
    do banco (webhook) ou pelo botão *Sincronizar agora*.
-2. **Categorização** — cada movimentação recebe uma categoria do plano de
-   contas. Ao escolher uma, o sistema oferece *aplicar a todas* da mesma
-   contraparte: isso vira uma regra, que vale para o passado e para o que
-   chegar depois. Escolha manual nunca é mudada por regra. Em **Regras**
-   (`/regras`) dá para editar a categoria de cada regra e um *nome de
-   exibição* ("Pix enviado José Wyvinnes…" aparece como "José (cozinha)"),
-   e rodar as regras na hora (*Aplicar regras agora*).
-3. **DRE** (`/dre`) — regime de caixa, mês a mês:
-   receita bruta − deduções = receita líquida − custos variáveis =
-   **margem de contribuição** − despesas fixas = resultado operacional ±
-   financeiro = **resultado líquido**. Cada valor leva às movimentações dele.
-4. **Fluxo de caixa** (`/fluxo-de-caixa`) — saldo inicial, operação (o
-   resultado da DRE), investimentos, empréstimos, sócios e saldo final. Os
-   saldos são reconstruídos de trás para frente a partir do saldo de hoje.
+2. **Categorização** — no extrato, cada linha tem nome (clique para editar;
+   o padrão é a descrição do banco), categoria e centro de custo. Editar
+   qualquer um deles vale para todas as linhas **iguais** — mesmo CPF/CNPJ,
+   senão mesma contraparte, senão mesma descrição, no mesmo sentido —,
+   passadas e futuras: a edição vira uma regra. *Só nesta* faz a exceção
+   (escolha manual, que regra nenhuma muda).
+3. **Configurações** (`/configuracoes`) — a estrutura da DRE é editável:
+   linhas (grupos que somam categorias e subtotais que somam tudo acima),
+   categorias de cada linha com o centro de custo padrão, centros de custo e
+   as regras (categoria, nome de exibição e centro de cada uma).
+4. **DRE** (`/dre`) — regime de caixa, mês a mês, na estrutura configurada
+   (a inicial: receita bruta − deduções = receita líquida − custos variáveis
+   = **margem de contribuição** − despesas fixas = resultado operacional ±
+   financeiro = **resultado líquido**). Filtra por centro de custo. Cada
+   valor leva às movimentações dele.
+5. **Fluxo de caixa** (`/fluxo-de-caixa`) — saldo inicial, operação (o
+   resultado da DRE), cada linha de fora da DRE e saldo final. Os saldos são
+   reconstruídos de trás para frente a partir do saldo de hoje.
 
 Investimentos, empréstimos (entrada e parcelas), aportes/retiradas de sócios e
 transferências entre contas próprias ficam **fora da DRE**: mexem no caixa,

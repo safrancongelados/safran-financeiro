@@ -3,12 +3,14 @@ import { ChevronLeft, ChevronRight, Landmark, TrendingDown, Wallet } from "lucid
 import {
   categoriasParaDre,
   listarConexoesComContas,
+  listarLinhasDre,
   saldoAtualDasContas,
   somasPorMesECategoria,
   variacaoPorMesDesde,
 } from "@/db/queries/financeiro";
 import { formatarCentavos } from "@/lib/dinheiro";
 import { montarDre, saldosNoFimDoMes } from "@/lib/dre";
+import { movimentoDoFluxo } from "@/lib/dre-tabela";
 import { anoValido, mesAtual, mesesDoAno } from "@/lib/periodo";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
@@ -35,8 +37,9 @@ export default async function FluxoDeCaixaPage({ searchParams }: PageProps<"/flu
     typeof anoParam === "string" && anoValido(anoParam) && Number(anoParam) <= anoCorrente ? Number(anoParam) : anoCorrente;
   const meses = mesesDoAno(ano).filter((m) => m <= hoje);
 
-  const [conexoes, categorias, somas, variacao, saldo] = await Promise.all([
+  const [conexoes, linhasConfig, categorias, somas, variacao, saldo] = await Promise.all([
     listarConexoesComContas(),
+    listarLinhasDre(),
     categoriasParaDre(),
     somasPorMesECategoria(`${ano}-01-01`, `${ano + 1}-01-01`),
     variacaoPorMesDesde(`${ano}-01-01`),
@@ -90,7 +93,7 @@ export default async function FluxoDeCaixaPage({ searchParams }: PageProps<"/flu
   // ano de histórico, e colunas vazias antes disso só empurram a tabela.
   const primeiroComDado = somas.reduce((min, s) => (s.mes < min ? s.mes : min), meses[meses.length - 1]);
   const mesesComDado = meses.filter((m) => m >= primeiroComDado);
-  const dre = montarDre(mesesComDado, categorias, somas);
+  const dre = montarDre(mesesComDado, linhasConfig, categorias, somas);
   const saldoFinal = saldosNoFimDoMes(saldo.saldoCentavos, variacao, mesesComDado, hoje);
   const saldoInicial = Object.fromEntries(
     mesesComDado.map((m) => [m, saldoFinal[m] === null ? null : saldoFinal[m]! - (dre.variacaoCaixa.porMes[m] ?? 0)])
@@ -104,25 +107,7 @@ export default async function FluxoDeCaixaPage({ searchParams }: PageProps<"/flu
   const linhas: LinhaTabela[] = [
     { tipo: "saldo", label: "Saldo inicial", porMes: saldoInicial, total: saldoInicial[primeiro] },
     { tipo: "secao", label: "Movimento do mês" },
-    {
-      tipo: "grupo",
-      label: "Operação (resultado da DRE)",
-      serie: dre.resultadoLiquido,
-    },
-    { tipo: "categoria", label: "Investimentos", serie: dre.grupos.investimento },
-    { tipo: "categoria", label: "Empréstimos", serie: dre.grupos.financiamento },
-    { tipo: "categoria", label: "Sócios", serie: dre.grupos.socios },
-    { tipo: "categoria", label: "Transferências", serie: dre.grupos.transferencia },
-    ...(dre.semCategoria.total !== 0 || Object.values(dre.semCategoria.porMes).some((v) => v !== 0)
-      ? [
-          {
-            tipo: "alerta",
-            label: "Sem categoria",
-            serie: dre.semCategoria,
-            href: (mes: string) => `/extrato?mes=${mes}&sem=1`,
-          } satisfies LinhaTabela,
-        ]
-      : []),
+    ...movimentoDoFluxo(dre),
     { tipo: "subtotal", label: "= Variação do mês", serie: dre.variacaoCaixa },
     { tipo: "saldo", label: "Saldo final", porMes: saldoFinal, total: saldoFinal[ultimo] },
   ];

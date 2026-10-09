@@ -1,13 +1,13 @@
 /**
  * DRE e fluxo de caixa a partir das movimentações categorizadas. Sem I/O:
- * recebe somas por mês e categoria e monta as linhas.
+ * recebe a estrutura configurada e as somas por mês e categoria e monta as
+ * linhas.
  *
  * Regime de caixa: cada valor entra no mês em que passou pela conta. Os
  * valores já vêm com sinal (entrada positiva, saída negativa), então cada
  * subtotal é só soma — custo e despesa reduzem o resultado por conta própria.
  */
-import type { GrupoDre } from "@/db/schema";
-import { GRUPOS } from "./grupos";
+import type { SecaoDre, TipoLinhaDre } from "@/db/schema";
 
 export interface SomaMensal {
   mes: string; // YYYY-MM
@@ -15,10 +15,21 @@ export interface SomaMensal {
   valorCentavos: number;
 }
 
+/** Linha da estrutura da DRE, como está configurada (aba Configurações). */
+export interface LinhaDreConfig {
+  id: string;
+  nome: string;
+  tipo: TipoLinhaDre;
+  secao: SecaoDre;
+  ordem: number;
+  basePercentual: boolean;
+  mostrarPercentual: boolean;
+}
+
 export interface CategoriaDre {
   id: string;
   nome: string;
-  grupo: GrupoDre;
+  linhaId: string;
   ordem: number;
 }
 
@@ -32,14 +43,21 @@ export interface LinhaCategoria extends Serie {
   categoria: CategoriaDre;
 }
 
+export interface LinhaMontada extends Serie {
+  linha: LinhaDreConfig;
+  /** Só em linhas de grupo, na ordem do plano de contas. */
+  categorias: LinhaCategoria[];
+}
+
 export interface Dre {
   meses: string[];
-  grupos: Record<GrupoDre, Serie & { categorias: LinhaCategoria[] }>;
+  /** Todas as linhas configuradas, na ordem; subtotais já calculados. */
+  linhas: LinhaMontada[];
+  /** Soma de todos os grupos da seção DRE: o resultado do período. */
+  resultado: Serie;
+  /** A linha marcada como 100% dos percentuais, se houver. */
+  base: LinhaMontada | null;
   semCategoria: Serie;
-  receitaLiquida: Serie;
-  margemContribuicao: Serie;
-  resultadoOperacional: Serie;
-  resultadoLiquido: Serie;
   /** Tudo que passou pela conta: resultado + o que fica fora da DRE + o que falta categorizar. */
   variacaoCaixa: Serie;
 }
@@ -62,59 +80,63 @@ function acumular(serie: Serie, mes: string, valor: number) {
   serie.total += valor;
 }
 
-export function montarDre(meses: string[], categorias: CategoriaDre[], somas: SomaMensal[]): Dre {
+/**
+ * Monta a DRE na estrutura configurada. Linha de grupo soma as categorias
+ * dela; subtotal é a soma de todos os grupos da seção DRE acima dele — a
+ * cascata receita → receita líquida → margem → resultado sai daí sozinha.
+ * Categoria apontando para linha que não existe (ou que não é grupo) cai em
+ * "sem categoria", para o total do caixa nunca deixar de fechar.
+ */
+export function montarDre(
+  meses: string[],
+  linhasConfig: LinhaDreConfig[],
+  categorias: CategoriaDre[],
+  somas: SomaMensal[]
+): Dre {
   const doPeriodo = new Set(meses);
-  const porId = new Map(categorias.map((c) => [c.id, c]));
-
-  const grupos = Object.fromEntries(
-    GRUPOS.map((g) => [g.id, { ...serieVazia(meses), categorias: [] as LinhaCategoria[] }])
-  ) as Dre["grupos"];
-  const linhas = new Map<string, LinhaCategoria>();
+  const ordenadas = [...linhasConfig].sort((a, b) => a.ordem - b.ordem);
+  const linhas: LinhaMontada[] = ordenadas.map((linha) => ({ linha, categorias: [], ...serieVazia(meses) }));
+  const grupoPorId = new Map(linhas.filter((l) => l.linha.tipo === "grupo").map((l) => [l.linha.id, l]));
+  const categoriaPorId = new Map(categorias.map((c) => [c.id, c]));
+  const linhasCategoria = new Map<string, LinhaCategoria>();
   const semCategoria = serieVazia(meses);
 
   for (const s of somas) {
     if (!doPeriodo.has(s.mes)) continue;
-    const categoria = s.categoriaId ? porId.get(s.categoriaId) : undefined;
-    if (!categoria) {
+    const categoria = s.categoriaId ? categoriaPorId.get(s.categoriaId) : undefined;
+    const grupo = categoria ? grupoPorId.get(categoria.linhaId) : undefined;
+    if (!categoria || !grupo) {
       acumular(semCategoria, s.mes, s.valorCentavos);
       continue;
     }
-    let linha = linhas.get(categoria.id);
-    if (!linha) {
-      linha = { categoria, ...serieVazia(meses) };
-      linhas.set(categoria.id, linha);
-      grupos[categoria.grupo].categorias.push(linha);
+    let lc = linhasCategoria.get(categoria.id);
+    if (!lc) {
+      lc = { categoria, ...serieVazia(meses) };
+      linhasCategoria.set(categoria.id, lc);
+      grupo.categorias.push(lc);
     }
-    acumular(linha, s.mes, s.valorCentavos);
-    acumular(grupos[categoria.grupo], s.mes, s.valorCentavos);
+    acumular(lc, s.mes, s.valorCentavos);
+    acumular(grupo, s.mes, s.valorCentavos);
   }
 
-  for (const g of Object.values(grupos)) g.categorias.sort((a, b) => a.categoria.ordem - b.categoria.ordem);
+  let acumulado = serieVazia(meses);
+  for (const l of linhas) {
+    if (l.linha.tipo === "grupo") {
+      l.categorias.sort((a, b) => a.categoria.ordem - b.categoria.ordem || a.categoria.nome.localeCompare(b.categoria.nome));
+      if (l.linha.secao === "dre") acumulado = somar(meses, acumulado, l);
+    } else {
+      const sub = somar(meses, acumulado);
+      l.porMes = sub.porMes;
+      l.total = sub.total;
+    }
+  }
 
-  const receitaLiquida = somar(meses, grupos.receita, grupos.deducao);
-  const margemContribuicao = somar(meses, receitaLiquida, grupos.custo_variavel);
-  const resultadoOperacional = somar(meses, margemContribuicao, grupos.despesa_fixa);
-  const resultadoLiquido = somar(meses, resultadoOperacional, grupos.financeiro);
-  const variacaoCaixa = somar(
-    meses,
-    resultadoLiquido,
-    grupos.investimento,
-    grupos.financiamento,
-    grupos.socios,
-    grupos.transferencia,
-    semCategoria
-  );
+  const grupos = linhas.filter((l) => l.linha.tipo === "grupo");
+  const resultado = somar(meses, ...grupos.filter((l) => l.linha.secao === "dre"));
+  const base = linhas.find((l) => l.linha.basePercentual) ?? null;
+  const variacaoCaixa = somar(meses, ...grupos, semCategoria);
 
-  return {
-    meses,
-    grupos,
-    semCategoria,
-    receitaLiquida,
-    margemContribuicao,
-    resultadoOperacional,
-    resultadoLiquido,
-    variacaoCaixa,
-  };
+  return { meses, linhas, resultado, base, semCategoria, variacaoCaixa };
 }
 
 /**

@@ -16,20 +16,16 @@ import {
 // gera divergência de centavo entre a DRE e o extrato do banco.
 
 /**
- * Onde cada categoria cai na DRE. Os quatro últimos ficam fora da DRE e só
- * aparecem no fluxo de caixa: mexem no saldo, mas não são receita nem despesa.
+ * Linha da DRE: `grupo` soma as categorias dela; `subtotal` é a soma acumulada
+ * de todos os grupos da seção `dre` acima dele (receita líquida, margem...).
  */
-export const grupoDreEnum = pgEnum("grupo_dre", [
-  "receita",
-  "deducao",
-  "custo_variavel",
-  "despesa_fixa",
-  "financeiro",
-  "investimento",
-  "financiamento",
-  "socios",
-  "transferencia",
-]);
+export const tipoLinhaDreEnum = pgEnum("tipo_linha_dre", ["grupo", "subtotal"]);
+/**
+ * `dre`: entra no resultado. `caixa`: fora da DRE, mas mexe no saldo
+ * (investimento, empréstimo, sócios). `transferencia`: dinheiro que só muda
+ * de conta da própria Safran — fora da DRE e das entradas/saídas do extrato.
+ */
+export const secaoDreEnum = pgEnum("secao_dre", ["dre", "caixa", "transferencia"]);
 
 /** Em que campo da movimentação a regra procura o padrão. */
 export const campoRegraEnum = pgEnum("campo_regra", ["documento", "contraparte", "descricao"]);
@@ -45,34 +41,64 @@ export const usuarios = pgTable("usuarios", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+/** Estrutura da DRE, editável na aba Configurações. */
+export const linhasDre = pgTable("linhas_dre", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  nome: text("nome").notNull().unique(),
+  tipo: tipoLinhaDreEnum("tipo").notNull().default("grupo"),
+  secao: secaoDreEnum("secao").notNull().default("dre"),
+  ordem: integer("ordem").notNull().default(0),
+  /** Linha que é o 100% dos percentuais (normalmente a receita líquida). Só uma. */
+  basePercentual: boolean("base_percentual").notNull().default(false),
+  /** Subtotal que mostra, embaixo, quanto é da linha base. */
+  mostrarPercentual: boolean("mostrar_percentual").notNull().default(false),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Centro de custo: quem gasta (Produção, Comercial...). Vem da categoria, com exceção por regra. */
+export const centrosCusto = pgTable("centros_custo", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  nome: text("nome").notNull().unique(),
+  ordem: integer("ordem").notNull().default(0),
+  ativo: boolean("ativo").notNull().default(true),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 /** Plano de contas. Desativar esconde dos seletores sem apagar o histórico. */
 export const categorias = pgTable("categorias", {
   id: uuid("id").primaryKey().defaultRandom(),
   nome: text("nome").notNull().unique(),
-  grupo: grupoDreEnum("grupo").notNull(),
+  /** Linha (do tipo grupo) da DRE em que a categoria soma. */
+  linhaId: uuid("linha_id")
+    .notNull()
+    .references(() => linhasDre.id),
+  /** Centro de custo padrão de tudo que cai nesta categoria. */
+  centroCustoId: uuid("centro_custo_id").references(() => centrosCusto.id, { onDelete: "set null" }),
   ordem: integer("ordem").notNull().default(0),
   ativa: boolean("ativa").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 /**
- * Regra de categorização automática: "o que vier desta contraparte vai para
- * esta categoria". Nasce quando alguém categoriza uma movimentação e escolhe
- * aplicar às outras da mesma contraparte.
+ * Regra automática: "o que vier desta contraparte vai para esta categoria,
+ * aparece com este nome e conta neste centro de custo". Cada campo é
+ * opcional — uma regra pode só dar nome. Nasce quando alguém edita uma linha
+ * do extrato (vale para as iguais) ou na aba Configurações.
  */
 export const regrasCategorizacao = pgTable(
   "regras_categorizacao",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    categoriaId: uuid("categoria_id")
-      .notNull()
-      .references(() => categorias.id, { onDelete: "cascade" }),
+    /** Nula = a regra não decide categoria (só nome ou centro). */
+    categoriaId: uuid("categoria_id").references(() => categorias.id, { onDelete: "set null" }),
     campo: campoRegraEnum("campo").notNull(),
     /** Documento: só dígitos, igualdade. Texto: trecho, sem acento nem caixa. */
     padrao: text("padrao").notNull(),
     sentido: sentidoRegraEnum("sentido").notNull().default("ambos"),
     /** Como o extrato mostra o que casa com a regra ("José (cozinha)"). Nulo = a descrição do banco. */
     nomeExibicao: text("nome_exibicao"),
+    /** Exceção ao centro de custo padrão da categoria. Nulo = segue a categoria. */
+    centroCustoId: uuid("centro_custo_id").references(() => centrosCusto.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [unique("regra_campo_padrao_sentido_unq").on(t.campo, t.padrao, t.sentido)]
@@ -149,11 +175,12 @@ export const movimentacoesBancarias = pgTable(
     categoriaId: uuid("categoria_id").references(() => categorias.id, { onDelete: "set null" }),
     /** `manual` nunca é mexida por regra. Nulo = sem categoria. */
     categorizadaPor: origemCategoriaEnum("categorizada_por"),
-    /**
-     * A regra que casa com a linha, mesmo quando a categoria foi escolhida à
-     * mão: é dela que vem o nome de exibição. Gravada por aplicarRegras.
-     */
+    /** A regra que deu a categoria (o selo "auto" do extrato leva até ela). Gravada por aplicarRegras. */
     regraId: uuid("regra_id").references(() => regrasCategorizacao.id, { onDelete: "set null" }),
+    /** Nome que o extrato mostra; nulo = a descrição do banco. Vem das regras, gravado por aplicarRegras. */
+    nomeExibicao: text("nome_exibicao"),
+    /** Exceção da regra ou o padrão da categoria. Gravado por aplicarRegras. */
+    centroCustoId: uuid("centro_custo_id").references(() => centrosCusto.id, { onDelete: "set null" }),
     payloadBruto: jsonb("payload_bruto"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -163,10 +190,14 @@ export const movimentacoesBancarias = pgTable(
     index("movimentacao_data_idx").on(t.data),
     index("movimentacao_categoria_idx").on(t.categoriaId),
     index("movimentacao_regra_idx").on(t.regraId),
+    index("movimentacao_centro_idx").on(t.centroCustoId),
   ]
 );
 
-export type GrupoDre = (typeof grupoDreEnum.enumValues)[number];
+export type TipoLinhaDre = (typeof tipoLinhaDreEnum.enumValues)[number];
+export type SecaoDre = (typeof secaoDreEnum.enumValues)[number];
+export type LinhaDre = typeof linhasDre.$inferSelect;
+export type CentroCusto = typeof centrosCusto.$inferSelect;
 export type CampoRegra = (typeof campoRegraEnum.enumValues)[number];
 export type SentidoRegra = (typeof sentidoRegraEnum.enumValues)[number];
 export type Categoria = typeof categorias.$inferSelect;
