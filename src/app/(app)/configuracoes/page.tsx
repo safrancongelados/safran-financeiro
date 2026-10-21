@@ -1,7 +1,7 @@
 import { Trash2 } from "lucide-react";
 import { excluirLinhaAction, moverCategoriaAction, moverLinhaAction } from "@/actions/configuracoes";
 import { listarCategorias, listarCentrosCusto, listarLinhasDre } from "@/db/queries/financeiro";
-import { opcoesDeCentro, PAPEL_LABEL, SECAO_LABEL } from "@/lib/opcoes";
+import { LINHA_PRODUTO_LABEL, opcoesDeCentro, PAPEL_LABEL, papelRateioDe, SECAO_LABEL } from "@/lib/opcoes";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -71,21 +71,34 @@ export default async function EstruturaDrePage() {
 
               {subtotal ? null : (
                 <div className="mx-4 space-y-1.5 border-l-2 border-border pl-4">
-                  {daLinha.map((c, j) => (
-                    <div key={c.id} className="flex items-center gap-2">
-                      <Mover id={c.id} action={moverCategoriaAction} primeiro={j === 0} ultimo={j === daLinha.length - 1} />
-                      <CategoriaForm
-                        key={`${c.id}-${c.nome}-${c.linhaId}-${c.centroCustoId ?? ""}-${c.ativa}`}
-                        categoria={c}
-                        linhaId={linha.id}
-                        linhas={grupos}
-                        centros={opcoesCentro}
-                      />
-                    </div>
-                  ))}
+                  {daLinha.map((c, j) => {
+                    const papelRateio = papelRateioDe(c);
+                    return (
+                      <div key={c.id} className="flex items-center gap-2">
+                        <Mover id={c.id} action={moverCategoriaAction} primeiro={j === 0} ultimo={j === daLinha.length - 1} />
+                        <CategoriaForm
+                          key={`${c.id}-${c.nome}-${c.linhaId}-${c.centroCustoId ?? ""}-${c.ativa}-${papelRateio}`}
+                          categoria={{ ...c, papelRateio }}
+                          linhaId={linha.id}
+                          linhas={grupos}
+                          centros={opcoesCentro}
+                          comRateio={i === 0}
+                        />
+                        {c.rateada ? (
+                          <Badge variant="default" className="shrink-0">
+                            rateada
+                          </Badge>
+                        ) : c.linhaProduto ? (
+                          <Badge variant="secondary" className="shrink-0">
+                            {LINHA_PRODUTO_LABEL[c.linhaProduto]}
+                          </Badge>
+                        ) : null}
+                      </div>
+                    );
+                  })}
                   <div className="flex items-center gap-2 pt-1">
                     <span className="w-5 shrink-0" />
-                    <CategoriaForm linhaId={linha.id} linhas={grupos} centros={opcoesCentro} />
+                    <CategoriaForm linhaId={linha.id} linhas={grupos} centros={opcoesCentro} comRateio={i === 0} />
                   </div>
                 </div>
               )}

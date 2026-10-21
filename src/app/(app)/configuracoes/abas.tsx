@@ -8,6 +8,7 @@ const ABAS = [
   { href: "/configuracoes", label: "Estrutura da DRE" },
   { href: "/configuracoes/centros-de-custo", label: "Centros de custo" },
   { href: "/configuracoes/regras", label: "Regras" },
+  { href: "/configuracoes/loja", label: "Loja (mix de vendas)" },
   { href: "/configuracoes/conexao", label: "Conexão bancária" },
 ];
 

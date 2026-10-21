@@ -43,6 +43,13 @@
       "when": 1792582286414,
       "tag": "0005_dre_por_linha_de_produto",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1792619855370,
+      "tag": "0006_rateio_vendas_por_produto",
+      "breakpoints": true
     }
   ]
 }

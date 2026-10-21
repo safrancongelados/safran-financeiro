@@ -4,8 +4,10 @@ Sistema de DRE e fluxo de caixa da Safran Alimentos LTDA ("Safran
 Congelados", Maceió/AL, CNPJ 31.511.591/0001-95), a partir do extrato da conta
 bancária única da empresa (Pluggy / Open Finance). Ver `README.md`.
 
-- Separado do sistema de gestão (repositório `safran`): não lê pedidos nem
-  fichas técnicas. A única fonte é o extrato.
+- Separado do sistema de gestão (repositório `safran`): não lê fichas
+  técnicas. A fonte dos valores é o extrato; a loja (Cardápio Web) só dá o
+  mix de vendas por produto (`vendas_por_produto`), que rateia a categoria
+  de vendas na DRE.
 - Valores sempre em centavos inteiros, com o sinal do caixa.
 - DRE em regime de caixa; a estrutura (tabela `linhas_dre`) e o plano de
   contas (`categorias.linha_id`) são editáveis em Configurações, e as

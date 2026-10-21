@@ -15,6 +15,7 @@ import {
   listarConexoesComContas,
   listarLinhasDre,
   listarMovimentacoesRecentes,
+  mixPorMes,
   saldoAtualDasContas,
   somasAteODia,
   somasPorMesECategoria,
@@ -85,7 +86,7 @@ export default async function InicioPage() {
     );
   }
 
-  const [linhasConfig, categorias, somas, somasAnterior, saldo, semCategoria, recentes] = await Promise.all([
+  const [linhasConfig, categorias, somas, somasAnterior, saldo, semCategoria, recentes, mix] = await Promise.all([
     listarLinhasDre(),
     categoriasParaDre(),
     somasPorMesECategoria(`${meses[0]}-01`, `${deslocarMes(mes, 1)}-01`),
@@ -93,10 +94,11 @@ export default async function InicioPage() {
     saldoAtualDasContas(),
     contarSemCategoria(),
     listarMovimentacoesRecentes(8),
+    mixPorMes(`${meses[0]}-01`, `${deslocarMes(mes, 1)}-01`),
   ]);
 
-  const dre = montarDre(meses, linhasConfig, categorias, somas);
-  const dreAnterior = montarDre([mesAnterior], linhasConfig, categorias, somasAnterior);
+  const dre = montarDre(meses, linhasConfig, categorias, somas, mix);
+  const dreAnterior = montarDre([mesAnterior], linhasConfig, categorias, somasAnterior, mix);
   const atual = numerosDoMes(dre, mes);
   const anterior = numerosDoMes(dreAnterior, mesAnterior);
   const despesas = maioresDespesas(dre, mes);

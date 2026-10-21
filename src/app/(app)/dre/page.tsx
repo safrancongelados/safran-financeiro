@@ -7,13 +7,23 @@ import {
   listarConexoesComContas,
   listarLinhasDre,
   mesesComMovimento,
+  mixPorMes,
   somasPorMesECategoria,
 } from "@/db/queries/financeiro";
 import { formatarCentavos, formatarPercentual } from "@/lib/dinheiro";
 import { indicadores, montarDre } from "@/lib/dre";
 import { linhasDaDre } from "@/lib/dre-tabela";
 import { UUID } from "@/lib/extrato-filtros";
-import { intervaloDoPeriodo, lerPeriodo, mesAtual, mesesDoPeriodo, paramsDoPeriodo, rotuloPeriodo, type Periodo } from "@/lib/periodo";
+import {
+  intervaloDoPeriodo,
+  lerPeriodo,
+  mesAtual,
+  mesesDoPeriodo,
+  paramsDoPeriodo,
+  rotuloMesAno,
+  rotuloPeriodo,
+  type Periodo,
+} from "@/lib/periodo";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 import { StatTile } from "@/components/stat-tile";
@@ -42,7 +52,7 @@ export default async function DrePage({ searchParams }: PageProps<"/dre">) {
   const meses = mesesDoPeriodo(periodo, hoje);
   const { inicio, fim } = intervaloDoPeriodo(periodo, hoje);
 
-  const [conexoes, linhasConfig, categorias, somas, semCategoria, centros, mesesComDado] = await Promise.all([
+  const [conexoes, linhasConfig, categorias, somas, semCategoria, centros, mesesComDado, mix] = await Promise.all([
     listarConexoesComContas(),
     listarLinhasDre(),
     categoriasParaDre(),
@@ -50,6 +60,7 @@ export default async function DrePage({ searchParams }: PageProps<"/dre">) {
     contarSemCategoria(),
     listarCentrosCusto(),
     mesesComMovimento(),
+    mixPorMes(inicio, fim),
   ]);
   const anos = [...new Set([Number(hoje.slice(0, 4)), ...mesesComDado.map((m) => Number(m.slice(0, 4)))])].sort((a, b) => b - a);
 
@@ -108,7 +119,8 @@ export default async function DrePage({ searchParams }: PageProps<"/dre">) {
   // ano de histórico, e colunas vazias antes disso só empurram a tabela.
   const primeiroComDado = somas.reduce((min, s) => (s.mes < min ? s.mes : min), meses[meses.length - 1]);
   const mesesVisiveis = meses.filter((m) => m >= primeiroComDado);
-  const dre = montarDre(mesesVisiveis, linhasConfig, categorias, somas);
+  const dre = montarDre(mesesVisiveis, linhasConfig, categorias, somas, mix);
+  const temRateio = categorias.some((c) => c.rateada) && categorias.some((c) => c.linhaProduto);
 
   const receita = dre.linhas.find((l) => l.linha.secao === "dre" && l.linha.tipo === "grupo");
   // Médias mensais sem o mês em andamento, que ainda não tem todos os custos.
@@ -192,6 +204,20 @@ export default async function DrePage({ searchParams }: PageProps<"/dre">) {
         A coluna do mês corrente está em destaque e ainda vai mudar até o fim do mês; as médias dos indicadores não a
         incluem. Ponto de equilíbrio = custos fixos mensais ÷ margem de contribuição %. Investimentos, empréstimos,
         sócios e transferências ficam fora da DRE e aparecem no fluxo de caixa.
+        {temRateio ? (
+          <>
+            {" "}
+            As vendas do extrato são repartidas entre marmitas, porções, dietas e personal chef pelo mix de pedidos da
+            loja de cada mês (
+            <Link href="/configuracoes/loja" className="underline">
+              Configurações › Loja
+            </Link>
+            ).
+            {dre.mesesSemMix.length > 0
+              ? ` Sem mix em ${dre.mesesSemMix.map(rotuloMesAno).join(", ")}: tudo em marmitas.`
+              : null}
+          </>
+        ) : null}
       </p>
     </div>
   );

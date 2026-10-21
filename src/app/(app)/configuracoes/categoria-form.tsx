@@ -2,7 +2,7 @@
 
 import { useActionState } from "react";
 import { salvarCategoriaAction, type ConfigFormState } from "@/actions/configuracoes";
-import type { OpcaoCentro } from "@/lib/opcoes";
+import { LINHA_PRODUTO_LABEL, LINHAS_PRODUTO, type OpcaoCentro, type PapelRateio } from "@/lib/opcoes";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -11,20 +11,23 @@ const SELECT =
 
 /**
  * Uma categoria do plano de contas, editável ali mesmo: nome, em que linha da
- * DRE soma e o centro de custo padrão. Sem `categoria`, cria uma nova na
- * linha `linhaId`.
+ * DRE soma, o centro de custo padrão e o papel no rateio das vendas. Sem
+ * `categoria`, cria uma nova na linha `linhaId`.
  */
 export function CategoriaForm({
   categoria,
   linhaId,
   linhas,
   centros,
+  comRateio = false,
 }: {
-  categoria?: { id: string; nome: string; linhaId: string; centroCustoId: string | null; ativa: boolean };
+  categoria?: { id: string; nome: string; linhaId: string; centroCustoId: string | null; ativa: boolean; papelRateio: PapelRateio };
   linhaId: string;
   /** Linhas de grupo, para mover a categoria. */
   linhas: { id: string; nome: string }[];
   centros: OpcaoCentro[];
+  /** Mostra o seletor de rateio (faz sentido nas linhas de receita). */
+  comRateio?: boolean;
 }) {
   const action = salvarCategoriaAction.bind(null, categoria?.id ?? null);
   const [state, formAction, pendente] = useActionState<ConfigFormState, FormData>(action, {});
@@ -58,6 +61,25 @@ export function CategoriaForm({
           </option>
         ))}
       </select>
+      {comRateio || categoria?.papelRateio ? (
+        <select
+          name="papelRateio"
+          defaultValue={categoria?.papelRateio ?? ""}
+          aria-label="Papel no rateio das vendas"
+          title="As vendas do extrato (base) são repartidas na DRE pelo mix da loja entre as categorias que recebem uma linha de produto"
+          className={SELECT}
+        >
+          <option value="">Rateio: fora</option>
+          <option value="base">Rateio: base (vendas do extrato)</option>
+          {LINHAS_PRODUTO.map((l) => (
+            <option key={l} value={l}>
+              Recebe: {LINHA_PRODUTO_LABEL[l]}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <input type="hidden" name="papelRateio" value="" />
+      )}
       {categoria ? (
         <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
           <input type="checkbox" name="ativa" defaultChecked={categoria.ativa} className="size-4 accent-primary" />

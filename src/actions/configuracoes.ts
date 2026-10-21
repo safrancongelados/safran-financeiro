@@ -4,10 +4,20 @@ import { revalidatePath } from "next/cache";
 import { and, asc, eq, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
-import { categorias, centrosCusto, linhasDre, papelLinhaDreEnum, secaoDreEnum, tipoLinhaDreEnum } from "@/db/schema";
+import {
+  categorias,
+  centrosCusto,
+  linhaProdutoEnum,
+  linhasDre,
+  papelLinhaDreEnum,
+  secaoDreEnum,
+  tipoLinhaDreEnum,
+  vendasPorProduto,
+} from "@/db/schema";
 import { obterSessao } from "@/lib/auth";
 import { aplicarRegras } from "@/lib/categorizacao";
 import { eViolacaoDeUnicidade } from "@/lib/db-erros";
+import { lerCsvDeVendas } from "@/lib/vendas-por-produto";
 
 const uuid = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
 
@@ -162,9 +172,11 @@ const categoriaSchema = z.object({
   linhaId: uuid,
   centroCustoId: uuid.nullable(),
   ativa: z.boolean(),
+  /** "" = fora do rateio; "base" = a categoria de vendas rateada; senão a linha de produto que recebe. */
+  papelRateio: z.enum(["", "base", ...linhaProdutoEnum.enumValues]),
 });
 
-/** Cria (id null) ou edita uma categoria: nome, linha da DRE, centro padrão e se está ativa. */
+/** Cria (id null) ou edita uma categoria: nome, linha da DRE, centro padrão, papel no rateio e se está ativa. */
 export async function salvarCategoriaAction(
   id: string | null,
   _prev: ConfigFormState,
@@ -178,10 +190,17 @@ export async function salvarCategoriaAction(
     linhaId: formData.get("linhaId"),
     centroCustoId: vazioParaNulo(formData.get("centroCustoId")),
     ativa: id ? formData.get("ativa") === "on" : true,
+    papelRateio: formData.get("papelRateio") ?? "",
   });
   if (!parsed.success) return { erro: parsed.error.issues[0]?.message ?? "Dados inválidos." };
+  const { papelRateio, ...campos } = parsed.data;
+  const dados = {
+    ...campos,
+    rateada: papelRateio === "base",
+    linhaProduto: papelRateio && papelRateio !== "base" ? papelRateio : null,
+  };
 
-  const [linha] = await db.select({ tipo: linhasDre.tipo }).from(linhasDre).where(eq(linhasDre.id, parsed.data.linhaId)).limit(1);
+  const [linha] = await db.select({ tipo: linhasDre.tipo }).from(linhasDre).where(eq(linhasDre.id, dados.linhaId)).limit(1);
   if (linha?.tipo !== "grupo") return { erro: "Categoria só entra em linha de grupo (subtotal é calculado)." };
 
   const antes = id
@@ -189,24 +208,65 @@ export async function salvarCategoriaAction(
     : undefined;
 
   try {
-    if (id) {
-      await db.update(categorias).set(parsed.data).where(eq(categorias.id, id));
-    } else {
-      const [{ max }] = await db
-        .select({ max: sql<number>`coalesce(max(${categorias.ordem}), 0)::int` })
-        .from(categorias)
-        .where(eq(categorias.linhaId, parsed.data.linhaId));
-      await db.insert(categorias).values({ ...parsed.data, ordem: max + 10 });
-    }
+    await db.transaction(async (tx) => {
+      // Só uma categoria é a base do rateio, e cada linha de produto tem um destino só.
+      if (dados.rateada) {
+        await tx.update(categorias).set({ rateada: false }).where(id ? ne(categorias.id, id) : sql`true`);
+      }
+      if (dados.linhaProduto) {
+        await tx
+          .update(categorias)
+          .set({ linhaProduto: null })
+          .where(and(eq(categorias.linhaProduto, dados.linhaProduto), id ? ne(categorias.id, id) : sql`true`));
+      }
+      if (id) {
+        await tx.update(categorias).set(dados).where(eq(categorias.id, id));
+      } else {
+        const [{ max }] = await tx
+          .select({ max: sql<number>`coalesce(max(${categorias.ordem}), 0)::int` })
+          .from(categorias)
+          .where(eq(categorias.linhaId, dados.linhaId));
+        await tx.insert(categorias).values({ ...dados, ordem: max + 10 });
+      }
+    });
   } catch (err) {
     if (eViolacaoDeUnicidade(err)) return { erro: "Já existe uma categoria com esse nome." };
     throw err;
   }
 
   // O centro padrão vai para os lançamentos da categoria que não têm exceção.
-  if (antes && antes.centroCustoId !== parsed.data.centroCustoId) await aplicarRegras();
+  if (antes && antes.centroCustoId !== dados.centroCustoId) await aplicarRegras();
   revalidarTudo();
   return { ok: id ? "Categoria salva." : "Categoria criada." };
+}
+
+// ── Vendas por produto (o mix da loja) ─────────────────────────────────────
+
+/**
+ * Grava o mix de vendas colado como texto, uma linha por mês e produto:
+ * `2026-10;marmitas;23471,10;79` (mês; linha; valor em reais; pedidos).
+ * Mês e linha já existentes são substituídos.
+ */
+export async function salvarVendasPorProdutoAction(_prev: ConfigFormState, formData: FormData): Promise<ConfigFormState> {
+  if (!(await obterSessao())) return { erro: "Sessão expirada." };
+  const lido = lerCsvDeVendas(String(formData.get("csv") ?? ""));
+  if ("erro" in lido) return { erro: lido.erro };
+  if (lido.linhas.length === 0) return { erro: "Nenhuma linha para gravar." };
+
+  await db.transaction(async (tx) => {
+    for (const l of lido.linhas) {
+      await tx
+        .insert(vendasPorProduto)
+        .values({ mes: l.mes, linha: l.linha, valorCentavos: l.valorCentavos, pedidos: l.pedidos, atualizadoEm: new Date() })
+        .onConflictDoUpdate({
+          target: [vendasPorProduto.mes, vendasPorProduto.linha],
+          set: { valorCentavos: l.valorCentavos, pedidos: l.pedidos, atualizadoEm: new Date() },
+        });
+    }
+  });
+  revalidarTudo();
+  const meses = new Set(lido.linhas.map((l) => l.mes));
+  return { ok: `${lido.linhas.length} linha(s) gravada(s) em ${meses.size} mês(es).` };
 }
 
 export async function moverCategoriaAction(formData: FormData) {

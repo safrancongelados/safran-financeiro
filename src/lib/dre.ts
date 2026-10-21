@@ -7,12 +7,39 @@
  * valores já vêm com sinal (entrada positiva, saída negativa), então cada
  * subtotal é só soma — custo e despesa reduzem o resultado por conta própria.
  */
-import type { PapelLinhaDre, SecaoDre, TipoLinhaDre } from "@/db/schema";
+import type { LinhaProduto, PapelLinhaDre, SecaoDre, TipoLinhaDre } from "@/db/schema";
 
 export interface SomaMensal {
   mes: string; // YYYY-MM
   categoriaId: string | null;
   valorCentavos: number;
+}
+
+/** Vendas da loja por mês e linha de produto, em centavos. */
+export type MixVendas = Record<string, Partial<Record<LinhaProduto, number>>>;
+
+const LINHA_PADRAO: LinhaProduto = "marmitas";
+
+/**
+ * Reparte `valor` entre as linhas de produto na proporção do mix do mês. Sem
+ * mix (ou mix zerado), tudo vai para marmitas. A soma das partes é sempre
+ * `valor`: o resto do arredondamento fica com a maior parte.
+ */
+export function ratear(valor: number, mix: Partial<Record<LinhaProduto, number>> | undefined): Partial<Record<LinhaProduto, number>> {
+  const entradas = Object.entries(mix ?? {}).filter((e): e is [LinhaProduto, number] => (e[1] ?? 0) > 0);
+  const total = entradas.reduce((acc, [, v]) => acc + v, 0);
+  if (total <= 0) return { [LINHA_PADRAO]: valor };
+  const partes: Partial<Record<LinhaProduto, number>> = {};
+  let distribuido = 0;
+  let maior: LinhaProduto = entradas[0][0];
+  for (const [linha, v] of entradas) {
+    const parte = Math.round((valor * v) / total);
+    partes[linha] = parte;
+    distribuido += parte;
+    if (v > (mix?.[maior] ?? 0)) maior = linha;
+  }
+  partes[maior] = (partes[maior] ?? 0) + (valor - distribuido);
+  return partes;
 }
 
 /** Linha da estrutura da DRE, como está configurada (aba Configurações). */
@@ -33,6 +60,10 @@ export interface CategoriaDre {
   nome: string;
   linhaId: string;
   ordem: number;
+  /** A categoria de vendas que a DRE reparte pelo mix da loja. */
+  rateada?: boolean;
+  /** A linha de produto que esta categoria recebe no rateio. */
+  linhaProduto?: LinhaProduto | null;
 }
 
 /** Valor por mês e o total do período. */
@@ -62,6 +93,8 @@ export interface Dre {
   semCategoria: Serie;
   /** Tudo que passou pela conta: resultado + o que fica fora da DRE + o que falta categorizar. */
   variacaoCaixa: Serie;
+  /** Meses em que a categoria rateada teve movimento mas a loja não tinha mix: foi tudo para marmitas. */
+  mesesSemMix: string[];
 }
 
 function serieVazia(meses: string[]): Serie {
@@ -93,7 +126,8 @@ export function montarDre(
   meses: string[],
   linhasConfig: LinhaDreConfig[],
   categorias: CategoriaDre[],
-  somas: SomaMensal[]
+  somas: SomaMensal[],
+  mix: MixVendas = {}
 ): Dre {
   const doPeriodo = new Set(meses);
   const ordenadas = [...linhasConfig].sort((a, b) => a.ordem - b.ordem);
@@ -102,14 +136,19 @@ export function montarDre(
   const categoriaPorId = new Map(categorias.map((c) => [c.id, c]));
   const linhasCategoria = new Map<string, LinhaCategoria>();
   const semCategoria = serieVazia(meses);
+  const mesesSemMix = new Set<string>();
 
-  for (const s of somas) {
-    if (!doPeriodo.has(s.mes)) continue;
-    const categoria = s.categoriaId ? categoriaPorId.get(s.categoriaId) : undefined;
-    const grupo = categoria ? grupoPorId.get(categoria.linhaId) : undefined;
-    if (!categoria || !grupo) {
-      acumular(semCategoria, s.mes, s.valorCentavos);
-      continue;
+  // Quem recebe cada linha de produto no rateio: a primeira categoria marcada com ela.
+  const destinoDe = new Map<LinhaProduto, CategoriaDre>();
+  for (const c of [...categorias].sort((a, b) => a.ordem - b.ordem)) {
+    if (c.linhaProduto && !destinoDe.has(c.linhaProduto)) destinoDe.set(c.linhaProduto, c);
+  }
+
+  function lancar(categoria: CategoriaDre, mes: string, valor: number) {
+    const grupo = grupoPorId.get(categoria.linhaId);
+    if (!grupo) {
+      acumular(semCategoria, mes, valor);
+      return;
     }
     let lc = linhasCategoria.get(categoria.id);
     if (!lc) {
@@ -117,8 +156,28 @@ export function montarDre(
       linhasCategoria.set(categoria.id, lc);
       grupo.categorias.push(lc);
     }
-    acumular(lc, s.mes, s.valorCentavos);
-    acumular(grupo, s.mes, s.valorCentavos);
+    acumular(lc, mes, valor);
+    acumular(grupo, mes, valor);
+  }
+
+  for (const s of somas) {
+    if (!doPeriodo.has(s.mes)) continue;
+    const categoria = s.categoriaId ? categoriaPorId.get(s.categoriaId) : undefined;
+    if (!categoria || !grupoPorId.has(categoria.linhaId)) {
+      acumular(semCategoria, s.mes, s.valorCentavos);
+      continue;
+    }
+    // A categoria de vendas do extrato é repartida pelo mix da loja no mês.
+    if (categoria.rateada && destinoDe.size > 0) {
+      const mixDoMes = mix[s.mes];
+      if (!mixDoMes || Object.values(mixDoMes).every((v) => !v)) mesesSemMix.add(s.mes);
+      for (const [linha, parte] of Object.entries(ratear(s.valorCentavos, mixDoMes)) as [LinhaProduto, number][]) {
+        if (parte === 0) continue;
+        lancar(destinoDe.get(linha) ?? destinoDe.get(LINHA_PADRAO) ?? categoria, s.mes, parte);
+      }
+      continue;
+    }
+    lancar(categoria, s.mes, s.valorCentavos);
   }
 
   let acumulado = serieVazia(meses);
@@ -138,7 +197,7 @@ export function montarDre(
   const base = linhas.find((l) => l.linha.basePercentual) ?? null;
   const variacaoCaixa = somar(meses, ...grupos, semCategoria);
 
-  return { meses, linhas, resultado, base, semCategoria, variacaoCaixa };
+  return { meses, linhas, resultado, base, semCategoria, variacaoCaixa, mesesSemMix: [...mesesSemMix].sort() };
 }
 
 export interface Indicadores {

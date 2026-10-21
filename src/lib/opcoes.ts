@@ -1,5 +1,5 @@
 /** Opções dos seletores de categoria e centro de custo — sem I/O. */
-import type { PapelLinhaDre, SecaoDre } from "@/db/schema";
+import type { LinhaProduto, PapelLinhaDre, SecaoDre } from "@/db/schema";
 
 export const SECAO_LABEL: Record<SecaoDre, string> = {
   dre: "Na DRE",
@@ -11,6 +11,22 @@ export const PAPEL_LABEL: Record<PapelLinhaDre, string> = {
   margem: "margem de contribuição",
   operacional: "resultado operacional",
 };
+
+export const LINHA_PRODUTO_LABEL: Record<LinhaProduto, string> = {
+  marmitas: "Marmitas",
+  porcoes: "Porções",
+  dietas: "Dietas personalizadas",
+  personal_chef: "Personal chef",
+};
+
+export const LINHAS_PRODUTO = Object.keys(LINHA_PRODUTO_LABEL) as LinhaProduto[];
+
+/** O que uma categoria faz no rateio das vendas: nada, é a base, ou recebe uma linha de produto. */
+export type PapelRateio = "" | "base" | LinhaProduto;
+
+export function papelRateioDe(c: { rateada: boolean; linhaProduto: LinhaProduto | null }): PapelRateio {
+  return c.rateada ? "base" : (c.linhaProduto ?? "");
+}
 
 export interface GrupoOpcoes {
   label: string;

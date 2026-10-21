@@ -9,6 +9,7 @@ import {
   jsonb,
   pgEnum,
   index,
+  primaryKey,
   unique,
 } from "drizzle-orm/pg-core";
 
@@ -32,6 +33,14 @@ export const secaoDreEnum = pgEnum("secao_dre", ["dre", "caixa", "transferencia"
  * ponto de equilíbrio = custos fixos mensais ÷ margem %. Só um de cada.
  */
 export const papelLinhaDreEnum = pgEnum("papel_linha_dre", ["margem", "operacional"]);
+
+/**
+ * Linhas de produto da loja. O extrato não sabe o que foi vendido, então a
+ * categoria de vendas marcada como `rateada` é distribuída na DRE, mês a mês,
+ * pelo mix de pedidos da loja (`vendas_por_produto`) entre as categorias que
+ * têm `linha_produto`.
+ */
+export const linhaProdutoEnum = pgEnum("linha_produto", ["marmitas", "porcoes", "dietas", "personal_chef"]);
 
 /** Em que campo da movimentação a regra procura o padrão. */
 export const campoRegraEnum = pgEnum("campo_regra", ["documento", "contraparte", "descricao"]);
@@ -82,10 +91,31 @@ export const categorias = pgTable("categorias", {
     .references(() => linhasDre.id),
   /** Centro de custo padrão de tudo que cai nesta categoria. */
   centroCustoId: uuid("centro_custo_id").references(() => centrosCusto.id, { onDelete: "set null" }),
+  /** A categoria de vendas do extrato que a DRE rateia pelo mix da loja. Só uma. */
+  rateada: boolean("rateada").notNull().default(false),
+  /** Qual linha de produto esta categoria recebe no rateio. */
+  linhaProduto: linhaProdutoEnum("linha_produto"),
   ordem: integer("ordem").notNull().default(0),
   ativa: boolean("ativa").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * Vendas da loja por mês e linha de produto, em centavos — o mix que rateia
+ * a categoria de vendas na DRE. Vem do Cardápio Web (pedidos fechados, sem
+ * os cancelados, pelo mês de criação do pedido).
+ */
+export const vendasPorProduto = pgTable(
+  "vendas_por_produto",
+  {
+    mes: text("mes").notNull(),
+    linha: linhaProdutoEnum("linha").notNull(),
+    valorCentavos: integer("valor_centavos").notNull().default(0),
+    pedidos: integer("pedidos").notNull().default(0),
+    atualizadoEm: timestamp("atualizado_em", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.mes, t.linha] })]
+);
 
 /**
  * Regra automática: "o que vier desta contraparte vai para esta categoria,
@@ -205,6 +235,8 @@ export const movimentacoesBancarias = pgTable(
 export type TipoLinhaDre = (typeof tipoLinhaDreEnum.enumValues)[number];
 export type SecaoDre = (typeof secaoDreEnum.enumValues)[number];
 export type PapelLinhaDre = (typeof papelLinhaDreEnum.enumValues)[number];
+export type LinhaProduto = (typeof linhaProdutoEnum.enumValues)[number];
+export type VendaPorProduto = typeof vendasPorProduto.$inferSelect;
 export type LinhaDre = typeof linhasDre.$inferSelect;
 export type CentroCusto = typeof centrosCusto.$inferSelect;
 export type CampoRegra = (typeof campoRegraEnum.enumValues)[number];

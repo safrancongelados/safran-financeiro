@@ -8,8 +8,9 @@ import {
   linhasDre,
   movimentacoesBancarias,
   regrasCategorizacao,
+  vendasPorProduto,
 } from "@/db/schema";
-import type { CategoriaDre, LinhaDreConfig, SomaMensal } from "@/lib/dre";
+import type { CategoriaDre, LinhaDreConfig, MixVendas, SomaMensal } from "@/lib/dre";
 import type { FiltroExtrato } from "@/lib/extrato-filtros";
 import { DIRECAO_PADRAO } from "@/lib/extrato-filtros";
 import { normalizarTexto, regraCasa, type RegraAplicavel } from "@/lib/regras";
@@ -329,8 +330,31 @@ export async function saldoAtualDasContas(): Promise<{ saldoCentavos: number; at
 
 export async function categoriasParaDre(): Promise<CategoriaDre[]> {
   return db
-    .select({ id: categorias.id, nome: categorias.nome, linhaId: categorias.linhaId, ordem: categorias.ordem })
+    .select({
+      id: categorias.id,
+      nome: categorias.nome,
+      linhaId: categorias.linhaId,
+      ordem: categorias.ordem,
+      rateada: categorias.rateada,
+      linhaProduto: categorias.linhaProduto,
+    })
     .from(categorias);
+}
+
+/** O mix de vendas da loja por mês, em centavos, para os meses do intervalo [inicio, fim) (datas YYYY-MM-DD). */
+export async function mixPorMes(inicio: string, fim: string): Promise<MixVendas> {
+  const linhas = await db
+    .select()
+    .from(vendasPorProduto)
+    .where(and(gte(vendasPorProduto.mes, inicio.slice(0, 7)), lt(vendasPorProduto.mes, fim.slice(0, 7))));
+  const mix: MixVendas = {};
+  for (const l of linhas) (mix[l.mes] ??= {})[l.linha] = l.valorCentavos;
+  return mix;
+}
+
+/** Todas as vendas por produto registradas, do mês mais novo ao mais antigo. */
+export async function listarVendasPorProduto() {
+  return db.select().from(vendasPorProduto).orderBy(desc(vendasPorProduto.mes), asc(vendasPorProduto.linha));
 }
 
 /** Quantas movimentações de conta ainda estão sem categoria — o que falta para a DRE fechar. */

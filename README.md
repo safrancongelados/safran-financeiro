@@ -46,12 +46,21 @@ contas próprias da Safran (GitHub, Vercel, Supabase, Pluggy).
    categorias e o mês corrente fica em destaque. Cada valor leva às
    movimentações dele.
 
-   Duas limitações do extrato: o Mercado Pago e a Tuna liberam as vendas em
-   cartão já líquidas da taxa, então a receita bruta fica um pouco abaixo da
-   real e "Taxas de meios de pagamento" só registra o que vem cobrado à
-   parte; e o extrato não sabe qual produto foi vendido — toda venda entra
-   como marmitas e porções, e dieta ou personal chef se marcam por cliente
-   no extrato (vale para todos os lançamentos daquele cliente).
+   O extrato não sabe qual produto foi vendido: toda venda cai na categoria
+   **Vendas** (a base do rateio) e a DRE a reparte, mês a mês, entre
+   marmitas, porções, dietas personalizadas e personal chef pelo **mix de
+   pedidos da loja** (Cardápio Web), gravado em `vendas_por_produto` e
+   visível em Configurações › Loja. Regras do mix: item com "dieta" no nome
+   é dieta, "personal chef" é personal chef, categoria de porções é porção,
+   o resto é marmita; dietas e personal chef têm preço zero no item e o
+   valor vai na taxa adicional do pedido. Mês sem mix fica inteiro em
+   marmitas, com aviso. Por ora o mix entra colado como texto (ou por
+   migration); a sincronização automática depende de uma chave da API do
+   Cardápio Web.
+
+   Outra limitação: o Mercado Pago e a Tuna liberam as vendas em cartão já
+   líquidas da taxa, então a receita bruta fica um pouco abaixo da real e
+   "Taxas de meios de pagamento" só registra o que vem cobrado à parte.
 6. **Fluxo de caixa** (`/fluxo-de-caixa`) — saldo inicial, operação (o
    resultado da DRE), cada linha de fora da DRE e saldo final, no mesmo
    período da DRE. Os saldos são reconstruídos de trás para frente a partir
@@ -109,7 +118,8 @@ npm run usuario:criar -- email@dominio.com "Nome"   # mostra a senha provisória
 
 - `src/lib/pluggy/` — cliente da API, regra de sinal (`movimentacoes.ts`) e sync
 - `src/lib/regras.ts` — motor de categorização (puro)
-- `src/lib/dre.ts` — DRE e saldos (puro); `src/lib/resumo.ts` — os números da tela inicial
+- `src/lib/dre.ts` — DRE, rateio das vendas e saldos (puro); `src/lib/resumo.ts` — os números da tela inicial
+- `src/lib/vendas-por-produto.ts` — leitura do mix colado e a regra de classificação dos itens da loja
 - `src/lib/extrato-filtros.ts` — os filtros do extrato na URL; `src/lib/extrato.ts` — visão por nome
 - `src/lib/categorizacao.ts` — aplica as regras no banco
 - `src/app/api/cron/pluggy`, `src/app/api/webhooks/pluggy` — sync automático
