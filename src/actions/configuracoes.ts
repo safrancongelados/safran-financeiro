@@ -162,9 +162,10 @@ const categoriaSchema = z.object({
   linhaId: uuid,
   centroCustoId: uuid.nullable(),
   ativa: z.boolean(),
+  rateadaPorPedidos: z.boolean(),
 });
 
-/** Cria (id null) ou edita uma categoria: nome, linha da DRE, centro padrão e se está ativa. */
+/** Cria (id null) ou edita uma categoria: nome, linha da DRE, centro padrão, se está ativa e se é rateada pelos pedidos. */
 export async function salvarCategoriaAction(
   id: string | null,
   _prev: ConfigFormState,
@@ -178,11 +179,17 @@ export async function salvarCategoriaAction(
     linhaId: formData.get("linhaId"),
     centroCustoId: vazioParaNulo(formData.get("centroCustoId")),
     ativa: id ? formData.get("ativa") === "on" : true,
+    rateadaPorPedidos: formData.get("rateadaPorPedidos") === "on",
   });
   if (!parsed.success) return { erro: parsed.error.issues[0]?.message ?? "Dados inválidos." };
 
-  const [linha] = await db.select({ tipo: linhasDre.tipo }).from(linhasDre).where(eq(linhasDre.id, parsed.data.linhaId)).limit(1);
+  const [linha] = await db
+    .select({ tipo: linhasDre.tipo, secao: linhasDre.secao })
+    .from(linhasDre)
+    .where(eq(linhasDre.id, parsed.data.linhaId))
+    .limit(1);
   if (linha?.tipo !== "grupo") return { erro: "Categoria só entra em linha de grupo (subtotal é calculado)." };
+  if (parsed.data.rateadaPorPedidos && linha.secao !== "dre") return { erro: "Só categoria da DRE pode ser rateada pelos pedidos." };
 
   const antes = id
     ? (await db.select({ centroCustoId: categorias.centroCustoId }).from(categorias).where(eq(categorias.id, id)).limit(1))[0]

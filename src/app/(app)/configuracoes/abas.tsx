@@ -9,6 +9,7 @@ const ABAS = [
   { href: "/configuracoes/centros-de-custo", label: "Centros de custo" },
   { href: "/configuracoes/regras", label: "Regras" },
   { href: "/configuracoes/conexao", label: "Conexão bancária" },
+  { href: "/configuracoes/cardapio-web", label: "Cardápio Web" },
 ];
 
 export function AbasConfiguracoes() {

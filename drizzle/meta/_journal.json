@@ -43,6 +43,13 @@
       "when": 1792582286414,
       "tag": "0005_dre_por_linha_de_produto",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1792590166712,
+      "tag": "0006_pedidos_cardapio_web",
+      "breakpoints": true
     }
   ]
 }

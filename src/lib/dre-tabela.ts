@@ -7,13 +7,21 @@ import type { Dre, LinhaMontada } from "./dre";
 
 const hrefCategoria = (id: string) => (mes: string) => `/extrato?mes=${mes}&categoria=${id}`;
 const hrefSemCategoria = (mes: string) => `/extrato?mes=${mes}&categoria=sem`;
+/** Valor repartido pelos pedidos: o extrato não o explica; a tela do Cardápio Web, sim. */
+const hrefPedidos = (mes: string) => `/configuracoes/cardapio-web?mes=${mes}`;
 
-function bloco(l: LinhaMontada): LinhaTabela[] {
+function bloco(l: LinhaMontada, porPedidos: Set<string>): LinhaTabela[] {
   return [
     { tipo: "grupo", label: l.linha.nome, serie: l },
-    ...l.categorias.map(
-      (c): LinhaTabela => ({ tipo: "categoria", label: c.categoria.nome, serie: c, href: hrefCategoria(c.categoria.id) })
-    ),
+    ...l.categorias.map((c): LinhaTabela => {
+      const rateada = porPedidos.has(c.categoria.id);
+      return {
+        tipo: "categoria",
+        label: rateada ? `${c.categoria.nome} ·pedidos` : c.categoria.nome,
+        serie: c,
+        href: rateada ? hrefPedidos : hrefCategoria(c.categoria.id),
+      };
+    }),
   ];
 }
 
@@ -30,12 +38,22 @@ function linhaSemCategoria(dre: Dre): LinhaTabela[] {
  */
 export function linhasDaDre(
   dre: Dre,
-  { comPercentual, comCategorias = true }: { comPercentual: boolean; comCategorias?: boolean }
+  {
+    comPercentual,
+    comCategorias = true,
+    categoriasPorPedidos = new Set<string>(),
+  }: {
+    comPercentual: boolean;
+    comCategorias?: boolean;
+    /** Categorias cujo valor foi repartido pelos pedidos do Cardápio Web (marcadas e com link para lá). */
+    categoriasPorPedidos?: Set<string>;
+  }
 ): LinhaTabela[] {
   const naDre = dre.linhas.filter((l) => l.linha.secao === "dre");
   const fora = dre.linhas.filter((l) => l.linha.secao !== "dre" && l.linha.tipo === "grupo");
   const ultimoSubtotal = [...naDre].reverse().find((l) => l.linha.tipo === "subtotal");
-  const linhasDoGrupo = (l: LinhaMontada) => (comCategorias ? bloco(l) : bloco(l).slice(0, 1));
+  const linhasDoGrupo = (l: LinhaMontada) =>
+    comCategorias ? bloco(l, categoriasPorPedidos) : bloco(l, categoriasPorPedidos).slice(0, 1);
 
   const linhas: LinhaTabela[] = [];
   for (const l of naDre) {

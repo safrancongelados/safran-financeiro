@@ -4,14 +4,17 @@ Sistema de DRE e fluxo de caixa da Safran Alimentos LTDA ("Safran
 Congelados", Maceió/AL, CNPJ 31.511.591/0001-95), a partir do extrato da conta
 bancária única da empresa (Pluggy / Open Finance). Ver `README.md`.
 
-- Separado do sistema de gestão (repositório `safran`): não lê pedidos nem
-  fichas técnicas. A única fonte é o extrato.
+- Separado do sistema de gestão (repositório `safran`): não lê fichas
+  técnicas. O caixa vem só do extrato; os pedidos do Cardápio Web
+  (`src/lib/cardapio-web/`) entram apenas para repartir a receita recebida
+  por linha de produto (`src/lib/rateio.ts`) — nunca somam no caixa.
 - Valores sempre em centavos inteiros, com o sinal do caixa.
 - DRE em regime de caixa; a estrutura (tabela `linhas_dre`) e o plano de
   contas (`categorias.linha_id`) são editáveis em Configurações, e as
   mudanças de estrutura vão por migration de dados (ver `drizzle/0005`).
 - Contas próprias da Safran: GitHub `safrancongelados`, Vercel, Supabase
-  (projeto "financas") e Pluggy. Nunca commitar credenciais.
+  (projeto "financas"), Pluggy e a API do Cardápio Web. Nunca commitar
+  credenciais.
 
 <!-- BEGIN:nextjs-agent-rules -->
 

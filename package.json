@@ -10,7 +10,8 @@
     "db:generate": "node --env-file=.env.local node_modules/.bin/drizzle-kit generate",
     "db:deploy": "node scripts/migrate.mjs",
     "usuario:criar": "node --env-file=.env.local --import tsx scripts/criar-usuario.mts",
-    "pluggy:sync": "node --env-file=.env.local --import tsx scripts/pluggy-sync.mts"
+    "pluggy:sync": "node --env-file=.env.local --import tsx scripts/pluggy-sync.mts",
+    "cardapio-web:sync": "node --env-file=.env.local --import tsx scripts/cardapio-web-sync.mts"
   },
   "dependencies": {
     "@radix-ui/react-label": "^2.1.15",

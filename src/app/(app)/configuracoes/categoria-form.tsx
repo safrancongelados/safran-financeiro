@@ -19,12 +19,15 @@ export function CategoriaForm({
   linhaId,
   linhas,
   centros,
+  receita = false,
 }: {
-  categoria?: { id: string; nome: string; linhaId: string; centroCustoId: string | null; ativa: boolean };
+  categoria?: { id: string; nome: string; linhaId: string; centroCustoId: string | null; ativa: boolean; rateadaPorPedidos: boolean };
   linhaId: string;
   /** Linhas de grupo, para mover a categoria. */
   linhas: { id: string; nome: string }[];
   centros: OpcaoCentro[];
+  /** Linha de receita: mostra a opção de ratear pelos pedidos do Cardápio Web. */
+  receita?: boolean;
 }) {
   const action = salvarCategoriaAction.bind(null, categoria?.id ?? null);
   const [state, formAction, pendente] = useActionState<ConfigFormState, FormData>(action, {});
@@ -62,6 +65,15 @@ export function CategoriaForm({
         <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
           <input type="checkbox" name="ativa" defaultChecked={categoria.ativa} className="size-4 accent-primary" />
           Ativa
+        </label>
+      ) : null}
+      {categoria && receita ? (
+        <label
+          className="flex items-center gap-1.5 text-xs text-muted-foreground"
+          title="O recebido nesta categoria é repartido, mês a mês, na proporção do que os pedidos do Cardápio Web venderam em cada linha de produto."
+        >
+          <input type="checkbox" name="rateadaPorPedidos" defaultChecked={categoria.rateadaPorPedidos} className="size-4 accent-primary" />
+          Rateada pelos pedidos
         </label>
       ) : null}
       <Button type="submit" size="sm" variant={categoria ? "ghost" : "secondary"} disabled={pendente}>

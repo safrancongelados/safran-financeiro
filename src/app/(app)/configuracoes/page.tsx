@@ -75,11 +75,12 @@ export default async function EstruturaDrePage() {
                     <div key={c.id} className="flex items-center gap-2">
                       <Mover id={c.id} action={moverCategoriaAction} primeiro={j === 0} ultimo={j === daLinha.length - 1} />
                       <CategoriaForm
-                        key={`${c.id}-${c.nome}-${c.linhaId}-${c.centroCustoId ?? ""}-${c.ativa}`}
+                        key={`${c.id}-${c.nome}-${c.linhaId}-${c.centroCustoId ?? ""}-${c.ativa}-${c.rateadaPorPedidos}`}
                         categoria={c}
                         linhaId={linha.id}
                         linhas={grupos}
                         centros={opcoesCentro}
+                        receita={linha.secao === "dre" && i === 0}
                       />
                     </div>
                   ))}

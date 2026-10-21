@@ -9,9 +9,11 @@ import {
   mesesComMovimento,
   somasPorMesECategoria,
 } from "@/db/queries/financeiro";
+import { categoriasRateadas, vendasPorMesECategoriaDre } from "@/db/queries/pedidos";
 import { formatarCentavos, formatarPercentual } from "@/lib/dinheiro";
 import { indicadores, montarDre } from "@/lib/dre";
 import { linhasDaDre } from "@/lib/dre-tabela";
+import { ratearPorPedidos } from "@/lib/rateio";
 import { UUID } from "@/lib/extrato-filtros";
 import { intervaloDoPeriodo, lerPeriodo, mesAtual, mesesDoPeriodo, paramsDoPeriodo, rotuloPeriodo, type Periodo } from "@/lib/periodo";
 import { PageHeader } from "@/components/page-header";
@@ -42,7 +44,7 @@ export default async function DrePage({ searchParams }: PageProps<"/dre">) {
   const meses = mesesDoPeriodo(periodo, hoje);
   const { inicio, fim } = intervaloDoPeriodo(periodo, hoje);
 
-  const [conexoes, linhasConfig, categorias, somas, semCategoria, centros, mesesComDado] = await Promise.all([
+  const [conexoes, linhasConfig, categorias, somas, semCategoria, centros, mesesComDado, rateadas, vendas] = await Promise.all([
     listarConexoesComContas(),
     listarLinhasDre(),
     categoriasParaDre(),
@@ -50,6 +52,9 @@ export default async function DrePage({ searchParams }: PageProps<"/dre">) {
     contarSemCategoria(),
     listarCentrosCusto(),
     mesesComMovimento(),
+    categoriasRateadas(),
+    // Receita não tem centro de custo: filtrando por centro, não há o que ratear.
+    centro ? Promise.resolve([]) : vendasPorMesECategoriaDre(inicio, fim),
   ]);
   const anos = [...new Set([Number(hoje.slice(0, 4)), ...mesesComDado.map((m) => Number(m.slice(0, 4)))])].sort((a, b) => b - a);
 
@@ -108,7 +113,14 @@ export default async function DrePage({ searchParams }: PageProps<"/dre">) {
   // ano de histórico, e colunas vazias antes disso só empurram a tabela.
   const primeiroComDado = somas.reduce((min, s) => (s.mes < min ? s.mes : min), meses[meses.length - 1]);
   const mesesVisiveis = meses.filter((m) => m >= primeiroComDado);
-  const dre = montarDre(mesesVisiveis, linhasConfig, categorias, somas);
+  // A venda genérica do extrato é repartida por linha de produto na proporção
+  // dos pedidos do Cardápio Web; o total do mês não muda.
+  const rateio = ratearPorPedidos(somas, rateadas.ids, vendas, rateadas.padraoId);
+  const mesesRateados = rateio.meses.filter((m) => m.rateado && mesesVisiveis.includes(m.mes));
+  const categoriasPorPedidos = new Set<string>(
+    mesesRateados.length > 0 ? [...rateadas.ids, ...vendas.map((v) => v.categoriaId ?? rateadas.padraoId!)] : []
+  );
+  const dre = montarDre(mesesVisiveis, linhasConfig, categorias, rateio.somas);
 
   const receita = dre.linhas.find((l) => l.linha.secao === "dre" && l.linha.tipo === "grupo");
   // Médias mensais sem o mês em andamento, que ainda não tem todos os custos.
@@ -186,12 +198,30 @@ export default async function DrePage({ searchParams }: PageProps<"/dre">) {
       <TabelaMensal
         meses={mesesVisiveis}
         mesDestaque={hoje}
-        linhas={linhasDaDre(dre, { comPercentual: !centro, comCategorias: !soTotais })}
+        linhas={linhasDaDre(dre, { comPercentual: !centro, comCategorias: !soTotais, categoriasPorPedidos })}
       />
       <p className="mt-3 text-xs text-muted-foreground">
         A coluna do mês corrente está em destaque e ainda vai mudar até o fim do mês; as médias dos indicadores não a
         incluem. Ponto de equilíbrio = custos fixos mensais ÷ margem de contribuição %. Investimentos, empréstimos,
         sócios e transferências ficam fora da DRE e aparecem no fluxo de caixa.
+        {mesesRateados.length > 0 ? (
+          <>
+            {" "}
+            Linhas marcadas com <em>·pedidos</em>: o recebido do mês foi repartido entre as linhas de produto na proporção
+            dos pedidos do Cardápio Web ({mesesRateados.length} de {mesesVisiveis.length} meses; o total não muda).{" "}
+            <Link href="/configuracoes/cardapio-web" className="font-medium underline">
+              Ver pedidos e mapeamento
+            </Link>
+          </>
+        ) : rateadas.ids.size > 0 && !centro ? (
+          <>
+            {" "}
+            Sem pedidos do Cardápio Web sincronizados, toda venda fica na categoria rateada.{" "}
+            <Link href="/configuracoes/cardapio-web" className="font-medium underline">
+              Sincronizar pedidos
+            </Link>
+          </>
+        ) : null}
       </p>
     </div>
   );

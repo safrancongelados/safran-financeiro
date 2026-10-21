@@ -7,6 +7,8 @@ import {
   timestamp,
   date,
   jsonb,
+  numeric,
+  bigint,
   pgEnum,
   index,
   unique,
@@ -84,6 +86,12 @@ export const categorias = pgTable("categorias", {
   centroCustoId: uuid("centro_custo_id").references(() => centrosCusto.id, { onDelete: "set null" }),
   ordem: integer("ordem").notNull().default(0),
   ativa: boolean("ativa").notNull().default(true),
+  /**
+   * Categoria de venda cujo recebido no banco é repartido, mês a mês, na
+   * proporção dos pedidos do Cardápio Web (ver `lib/rateio.ts`). O extrato
+   * não sabe o que foi vendido; os pedidos sabem.
+   */
+  rateadaPorPedidos: boolean("rateada_por_pedidos").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -211,3 +219,98 @@ export type CampoRegra = (typeof campoRegraEnum.enumValues)[number];
 export type SentidoRegra = (typeof sentidoRegraEnum.enumValues)[number];
 export type Categoria = typeof categorias.$inferSelect;
 export type Regra = typeof regrasCategorizacao.$inferSelect;
+
+// ── Cardápio Web ───────────────────────────────────────────────────────────
+//
+// Os pedidos da loja virtual (Cardápio Web) não entram no caixa — o caixa é
+// o extrato. Eles dizem o que foi vendido: servem para repartir a receita
+// recebida entre as linhas de produto da DRE e para conferir o recebido
+// contra o vendido.
+
+/** Estado da integração: uma linha só (a loja da Safran). */
+export const integracaoCardapioWeb = pgTable("integracao_cardapio_web", {
+  id: text("id").primaryKey().default("loja"),
+  merchantUuid: text("merchant_uuid"),
+  lojaNome: text("loja_nome"),
+  /** Primeiro dia já coberto pelo sync (o histórico é puxado de trás para a frente). */
+  cobertoDesde: date("coberto_desde", { mode: "string" }),
+  ultimoSyncEm: timestamp("ultimo_sync_em", { withTimezone: true }),
+  ultimoSyncOk: boolean("ultimo_sync_ok"),
+  ultimoSyncDetalhe: text("ultimo_sync_detalhe"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * Um pedido fechado (ou cancelado) no Cardápio Web. Valores em centavos, como
+ * o resto; `data` é o dia do pedido no fuso de Maceió — o mês da DRE em que
+ * ele conta para o rateio.
+ */
+export const pedidosCardapioWeb = pgTable(
+  "pedidos_cardapio_web",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    pedidoId: bigint("pedido_id", { mode: "number" }).notNull().unique(),
+    displayId: integer("display_id"),
+    /** closed, canceled... como no Cardápio Web. */
+    status: text("status").notNull(),
+    /** delivery, takeout, onsite, closed_table. */
+    tipo: text("tipo"),
+    /** catalog (site), portal, ifood... */
+    canal: text("canal"),
+    origemCliente: text("origem_cliente"),
+    criadoEm: timestamp("criado_em", { withTimezone: true }).notNull(),
+    data: date("data", { mode: "string" }).notNull(),
+    agendadoPara: date("agendado_para", { mode: "string" }),
+    atualizadoEm: timestamp("atualizado_em", { withTimezone: true }),
+    /** pix_auto, online_credit_card, credit_card, pix, food_voucher... */
+    meioPagamento: text("meio_pagamento"),
+    totalCentavos: integer("total_centavos").notNull(),
+    itensCentavos: integer("itens_centavos").notNull().default(0),
+    taxaEntregaCentavos: integer("taxa_entrega_centavos").notNull().default(0),
+    descontoCentavos: integer("desconto_centavos").notNull().default(0),
+    clienteNome: text("cliente_nome"),
+    payloadBruto: jsonb("payload_bruto"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("pedido_cw_data_idx").on(t.data), index("pedido_cw_status_idx").on(t.status)]
+);
+
+/** Um item de um pedido, com a categoria do cardápio em que ele estava. */
+export const itensPedidoCardapioWeb = pgTable(
+  "itens_pedido_cardapio_web",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    pedidoId: uuid("pedido_id")
+      .notNull()
+      .references(() => pedidosCardapioWeb.id, { onDelete: "cascade" }),
+    itemPedidoId: bigint("item_pedido_id", { mode: "number" }).notNull().unique(),
+    /** O item no catálogo (pode já não existir mais). */
+    itemId: bigint("item_id", { mode: "number" }),
+    codigoExterno: text("codigo_externo"),
+    nome: text("nome").notNull(),
+    /** Nome da categoria do cardápio ("Linha Performance"). Nulo = item fora do catálogo atual. */
+    categoriaCw: text("categoria_cw"),
+    quantidade: numeric("quantidade", { precision: 10, scale: 3, mode: "number" }).notNull().default(1),
+    precoUnitarioCentavos: integer("preco_unitario_centavos").notNull().default(0),
+    totalCentavos: integer("total_centavos").notNull(),
+  },
+  (t) => [index("item_pedido_cw_pedido_idx").on(t.pedidoId), index("item_pedido_cw_categoria_idx").on(t.categoriaCw)]
+);
+
+/**
+ * Em que categoria da DRE cada categoria do cardápio vende. Nula = na
+ * categoria rateada padrão (a venda genérica). Uma linha por categoria vista
+ * nos pedidos, criada pelo sync e escolhida em Configurações.
+ */
+export const mapeamentoCardapioWeb = pgTable("mapeamento_cardapio_web", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  categoriaCw: text("categoria_cw").notNull().unique(),
+  categoriaId: uuid("categoria_id").references(() => categorias.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type PedidoCardapioWeb = typeof pedidosCardapioWeb.$inferSelect;
+export type ItemPedidoCardapioWeb = typeof itensPedidoCardapioWeb.$inferSelect;
+export type MapeamentoCardapioWeb = typeof mapeamentoCardapioWeb.$inferSelect;
+export type IntegracaoCardapioWeb = typeof integracaoCardapioWeb.$inferSelect;
