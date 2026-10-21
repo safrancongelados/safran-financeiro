@@ -6,7 +6,7 @@ import type { LinhaTabela } from "@/components/tabela-mensal";
 import type { Dre, LinhaMontada } from "./dre";
 
 const hrefCategoria = (id: string) => (mes: string) => `/extrato?mes=${mes}&categoria=${id}`;
-const hrefSemCategoria = (mes: string) => `/extrato?mes=${mes}&sem=1`;
+const hrefSemCategoria = (mes: string) => `/extrato?mes=${mes}&categoria=sem`;
 
 function bloco(l: LinhaMontada): LinhaTabela[] {
   return [
@@ -28,15 +28,19 @@ function linhaSemCategoria(dre: Dre): LinhaTabela[] {
  * fora da DRE. `comPercentual: false` esconde os % (ex.: filtrando por centro,
  * a receita some e o % perde sentido).
  */
-export function linhasDaDre(dre: Dre, { comPercentual }: { comPercentual: boolean }): LinhaTabela[] {
+export function linhasDaDre(
+  dre: Dre,
+  { comPercentual, comCategorias = true }: { comPercentual: boolean; comCategorias?: boolean }
+): LinhaTabela[] {
   const naDre = dre.linhas.filter((l) => l.linha.secao === "dre");
   const fora = dre.linhas.filter((l) => l.linha.secao !== "dre" && l.linha.tipo === "grupo");
   const ultimoSubtotal = [...naDre].reverse().find((l) => l.linha.tipo === "subtotal");
+  const linhasDoGrupo = (l: LinhaMontada) => (comCategorias ? bloco(l) : bloco(l).slice(0, 1));
 
   const linhas: LinhaTabela[] = [];
   for (const l of naDre) {
     if (l.linha.tipo === "grupo") {
-      linhas.push(...bloco(l));
+      linhas.push(...linhasDoGrupo(l));
       continue;
     }
     linhas.push({ tipo: l === ultimoSubtotal ? "destaque" : "subtotal", label: `= ${l.linha.nome}`, serie: l });
@@ -49,7 +53,7 @@ export function linhasDaDre(dre: Dre, { comPercentual }: { comPercentual: boolea
 
   if (fora.length > 0) {
     linhas.push({ tipo: "secao", label: "Fora da DRE — só mexem no caixa" });
-    for (const l of fora) linhas.push(...bloco(l));
+    for (const l of fora) linhas.push(...linhasDoGrupo(l));
   }
   linhas.push(...linhaSemCategoria(dre));
   linhas.push({ tipo: "subtotal", label: "= Variação do caixa", serie: dre.variacaoCaixa });

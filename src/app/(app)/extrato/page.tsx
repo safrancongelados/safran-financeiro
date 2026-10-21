@@ -1,34 +1,54 @@
 import Link from "next/link";
-import { ArrowDownLeft, ArrowUpRight, ChevronLeft, ChevronRight, Landmark, Tags, Wallet, X } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowDownLeft,
+  ArrowUp,
+  ArrowUpRight,
+  Landmark,
+  Scale,
+  Settings,
+  Tags,
+} from "lucide-react";
 import {
   listarCategorias,
   listarCentrosCusto,
   listarConexoesComContas,
   listarLinhasDre,
   listarMovimentacoesDoMes,
+  mesesComMovimento,
+  totaisDoMes,
 } from "@/db/queries/financeiro";
 import { formatarCentavos } from "@/lib/dinheiro";
-import { formatarDocumento, statusConexao, TIPO_CONTA_LABEL } from "@/lib/extrato";
+import { agruparIguais, formatarDocumento, statusConexao } from "@/lib/extrato";
+import {
+  alternarOrdem,
+  hrefExtrato,
+  lerFiltroExtrato,
+  ordemEmVigor,
+  temFiltro,
+  type FiltroExtrato,
+  type OrdemExtrato,
+} from "@/lib/extrato-filtros";
 import { opcoesDeCategoria, opcoesDeCentro } from "@/lib/opcoes";
-import { deslocarMes, mesAtual, mesValido, rotuloMes } from "@/lib/periodo";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { mesAtual, mesValido, rotuloDia, rotuloMes } from "@/lib/periodo";
+import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 import { StatTile } from "@/components/stat-tile";
+import { Chip, GrupoChips } from "@/components/chip";
+import { SincronizarButton } from "@/components/conexao/sincronizar-button";
+import { ConectarBancoButton } from "@/components/conexao/conectar-banco";
 import { cn } from "@/lib/utils";
-import { SincronizarButton } from "./sincronizar-button";
-import { ConectarBancoForm } from "./conectar-form";
-import { ConectarBancoButton } from "./conectar-banco";
+import { FiltrosExtrato } from "./filtros-extrato";
 import { CategoriaSelect, CentroSelect, NomeEditavel } from "./edicao-linha";
 
 export const dynamic = "force-dynamic";
 // As actions desta página rodam o sync, que chama a Pluggy conta por conta.
 export const maxDuration = 60;
 
-// `data` é só a data (YYYY-MM-DD), lida como UTC para não voltar um dia.
-const DATA = new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit", timeZone: "UTC" });
 const DATA_HORA = new Intl.DateTimeFormat("pt-BR", {
   day: "2-digit",
   month: "2-digit",
@@ -37,252 +57,282 @@ const DATA_HORA = new Intl.DateTimeFormat("pt-BR", {
   timeZone: "America/Maceio",
 });
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-/** Alternativa ao widget: banco já autorizado pelo Meu Pluggy. */
-function ViaMeuPluggy() {
+/** Cabeçalho de coluna que ordena: clique ordena por ela; de novo, inverte. */
+function CabecalhoOrdenavel({
+  filtro,
+  ordem,
+  children,
+  className,
+}: {
+  filtro: FiltroExtrato;
+  ordem: OrdemExtrato;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  const vigente = ordemEmVigor(filtro);
+  const ativo = vigente.ordem === ordem;
+  const Seta = vigente.dir === "asc" ? ArrowUp : ArrowDown;
   return (
-    <details>
-      <summary className="cursor-pointer text-sm text-muted-foreground">
-        Já conectou pelo Meu Pluggy? Cole o ID do item
-      </summary>
-      <div className="mt-3">
-        <ConectarBancoForm />
-      </div>
-    </details>
-  );
-}
-
-interface Filtro {
-  mes: string;
-  conta?: string;
-  categoria?: string;
-  sem?: boolean;
-}
-
-function hrefExtrato({ mes, conta, categoria, sem }: Filtro) {
-  const params = new URLSearchParams({ mes });
-  if (conta) params.set("conta", conta);
-  if (categoria) params.set("categoria", categoria);
-  if (sem) params.set("sem", "1");
-  return `/extrato?${params}`;
-}
-
-function Chip({ href, ativo, children }: { href: string; ativo: boolean; children: React.ReactNode }) {
-  return (
-    <Link
-      href={href}
-      className={cn(
-        "inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-medium transition-colors",
-        ativo
-          ? "border-primary bg-primary-soft text-on-primary-soft"
-          : "border-border text-muted-foreground hover:bg-secondary"
-      )}
-    >
-      {children}
-    </Link>
+    <TableHead className={className}>
+      <Link
+        href={hrefExtrato(alternarOrdem(filtro, ordem))}
+        scroll={false}
+        className={cn(
+          "inline-flex items-center gap-1 rounded hover:text-foreground",
+          ativo && "text-foreground",
+          className?.includes("text-right") && "flex-row-reverse"
+        )}
+        title={`Ordenar por ${String(children).toLowerCase()}`}
+      >
+        {children}
+        <Seta className={cn("size-3", ativo ? "opacity-100" : "opacity-0")} />
+      </Link>
+    </TableHead>
   );
 }
 
 export default async function ExtratoPage({ searchParams }: PageProps<"/extrato">) {
   const params = await searchParams;
   const hoje = mesAtual();
-  const mes = typeof params.mes === "string" && mesValido(params.mes) ? params.mes : hoje;
-  const contaId = typeof params.conta === "string" && UUID.test(params.conta) ? params.conta : undefined;
-  const categoriaId = typeof params.categoria === "string" && UUID.test(params.categoria) ? params.categoria : undefined;
-  const semCategoria = params.sem === "1";
-  const filtro: Filtro = { mes, conta: contaId, categoria: categoriaId, sem: semCategoria };
+  const filtro = lerFiltroExtrato(params, hoje, mesValido);
+  const { mes } = filtro;
 
   const conexoes = await listarConexoesComContas();
 
   if (conexoes.length === 0) {
     return (
-      <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
-        <PageHeader title="Extrato" description="Movimentações da conta da Safran, via Pluggy (Open Finance)" />
-        <Card className="max-w-2xl">
-          <CardHeader>
-            <CardTitle>Conectar a conta da Safran</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-5">
-            <p className="text-sm text-muted-foreground">
-              Escolha o banco e autorize pelo Open Finance, com o login de quem acessa a conta da empresa. O extrato é
-              puxado na hora, e depois todo dia pelo sync automático. A DRE e o fluxo de caixa saem dele.
-            </p>
-            <ConectarBancoButton />
-            <ViaMeuPluggy />
-          </CardContent>
-        </Card>
+      <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8">
+        <PageHeader title="Extrato" description="Movimentações da conta da Safran, via Open Finance." />
+        <EmptyState
+          icon={Landmark}
+          title="Conta ainda não conectada"
+          description="Conecte a conta da Safran pelo Open Finance, com o login de quem acessa a conta da empresa. O extrato é puxado na hora e, depois, todo dia."
+          actionHref="/configuracoes/conexao"
+          actionLabel="Conectar banco"
+        />
       </div>
     );
   }
 
-  const [linhas, categorias, linhasDre, centros] = await Promise.all([
-    listarMovimentacoesDoMes(mes, { contaId, categoriaId, semCategoria }),
+  const [linhas, categorias, linhasDre, centros, meses, totais] = await Promise.all([
+    listarMovimentacoesDoMes(filtro),
     listarCategorias(),
     listarLinhasDre(),
     listarCentrosCusto(),
+    mesesComMovimento(),
+    totaisDoMes(mes),
   ]);
   const contas = conexoes.flatMap((c) => c.contas);
-  const categoriaFiltrada = categoriaId ? categorias.find((c) => c.id === categoriaId) : undefined;
-
   const opcoes = opcoesDeCategoria(linhasDre, categorias);
   const opcoesCentro = opcoesDeCentro(centros);
+  const filtrando = temFiltro(filtro);
+  const porNome = filtro.visao === "nomes";
 
-  const saldoEmConta = contas.filter((c) => c.tipo === "BANK").reduce((acc, c) => acc + c.saldoCentavos, 0);
-  // Entradas e saídas do caixa: só contas (não cartão) e sem transferência
-  // entre contas da própria Safran, que entraria duas vezes.
+  // O que o filtro deixou passar.
   const doCaixa = linhas.filter((l) => l.contaTipo === "BANK" && l.categoriaSecao !== "transferencia");
-  const entradas = doCaixa.filter((l) => l.valorCentavos > 0).reduce((acc, l) => acc + l.valorCentavos, 0);
-  const saidas = doCaixa.filter((l) => l.valorCentavos < 0).reduce((acc, l) => acc + l.valorCentavos, 0);
-  const pendentes = linhas.filter((l) => !l.categoriaId).length;
+  const entradasFiltro = doCaixa.filter((l) => l.valorCentavos > 0).reduce((acc, l) => acc + l.valorCentavos, 0);
+  const saidasFiltro = doCaixa.filter((l) => l.valorCentavos < 0).reduce((acc, l) => acc + l.valorCentavos, 0);
+  const grupos = porNome ? agruparIguais(linhas) : [];
+
+  const saldoDoMes = totais.entradasCentavos + totais.saidasCentavos;
+  const conexoesComAviso = conexoes.map((c) => ({ conexao: c, st: statusConexao(c.status) })).filter((c) => c.st.acao);
+  const principal = conexoes[0];
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
+    <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8">
       <PageHeader
         title="Extrato"
-        description="Movimentações da conta da Safran, via Pluggy (Open Finance)"
-        action={<SincronizarButton />}
+        description={
+          principal.dadosAtualizadosEm
+            ? `${principal.instituicao ?? "Banco"} · banco consultado em ${DATA_HORA.format(principal.dadosAtualizadosEm)}${principal.ultimoSyncEm ? ` · sync em ${DATA_HORA.format(principal.ultimoSyncEm)}` : ""}`
+            : `${principal.instituicao ?? "Banco"} · banco ainda não consultado`
+        }
+        action={
+          <div className="flex items-center gap-2">
+            <Button asChild variant="ghost" size="sm" className="text-muted-foreground">
+              <Link href="/configuracoes/conexao">
+                <Settings className="size-4" /> Conexão
+              </Link>
+            </Button>
+            <SincronizarButton />
+          </div>
+        }
       />
 
-      <Card className="mb-5 gap-0 py-0">
-        {conexoes.map((conexao) => {
-          const st = statusConexao(conexao.status);
-          return (
-            <div key={conexao.id} className="space-y-3 border-b border-border px-5 py-4">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <Landmark className="size-4 text-muted-foreground" />
-                  <p className="font-medium text-foreground">{conexao.instituicao ?? "Banco"}</p>
-                  <Badge variant={st.tom}>{st.label}</Badge>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  {conexao.dadosAtualizadosEm
-                    ? `Banco consultado em ${DATA_HORA.format(conexao.dadosAtualizadosEm)}`
-                    : "Banco ainda não consultado"}
-                  {conexao.ultimoSyncEm ? ` · sync em ${DATA_HORA.format(conexao.ultimoSyncEm)}` : null}
-                </p>
-              </div>
-
-              {st.acao ? (
-                <div className="flex flex-wrap items-center gap-3">
-                  <p className="text-sm text-on-warning-soft">{st.acao}</p>
-                  {st.reconectar ? <ConectarBancoButton itemId={conexao.providerItemId} variant="secondary" /> : null}
-                </div>
-              ) : null}
-              {conexao.ultimoSyncOk === false ? (
-                <p className="text-sm text-destructive">Último sync falhou: {conexao.ultimoSyncDetalhe}</p>
-              ) : null}
-
-              <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                {conexao.contas.map((conta) => (
-                  <li key={conta.id} className="rounded-lg border border-border px-3 py-2">
-                    <p className="truncate text-sm font-medium text-foreground">{conta.nome}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {TIPO_CONTA_LABEL[conta.subtipo ?? ""] ?? conta.subtipo ?? conta.tipo}
-                      {conta.numero ? ` · ${conta.numero}` : null}
-                    </p>
-                    <p className="mt-1 text-sm tabular-nums text-foreground">
-                      {conta.tipo === "CREDIT" ? "Fatura aberta " : "Saldo "}
-                      {formatarCentavos(conta.saldoCentavos)}
-                    </p>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          );
-        })}
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-3 px-5 py-3">
-          <ConectarBancoButton variant="secondary" />
-          <ViaMeuPluggy />
-        </div>
-      </Card>
+      {conexoesComAviso.map(({ conexao, st }) => (
+        <Card key={conexao.id} className="mb-5 flex-row flex-wrap items-center justify-between gap-3 border-warning/40 bg-warning-soft/40 px-4 py-3">
+          <p className="text-sm text-on-warning-soft">
+            <span className="font-semibold">{conexao.instituicao ?? "Banco"}:</span> {st.acao}
+          </p>
+          {st.reconectar ? <ConectarBancoButton itemId={conexao.providerItemId} variant="secondary" /> : null}
+        </Card>
+      ))}
 
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatTile icon={Wallet} label="Saldo em conta" value={formatarCentavos(saldoEmConta)} hint="hoje" />
-        <StatTile icon={ArrowDownLeft} label="Entradas no mês" value={formatarCentavos(entradas)} tone="success" />
-        <StatTile icon={ArrowUpRight} label="Saídas no mês" value={formatarCentavos(-saidas)} />
+        <StatTile icon={ArrowDownLeft} label="Entradas no mês" value={formatarCentavos(totais.entradasCentavos)} tone="success" />
+        <StatTile icon={ArrowUpRight} label="Saídas no mês" value={formatarCentavos(-totais.saidasCentavos)} />
+        <StatTile
+          icon={Scale}
+          label="Saldo do mês"
+          value={formatarCentavos(saldoDoMes)}
+          hint="entradas menos saídas"
+          tone={saldoDoMes < 0 ? "destructive" : "success"}
+        />
         <StatTile
           icon={Tags}
-          label="Sem categoria"
-          value={String(pendentes)}
-          hint={pendentes > 0 ? "não entram certo na DRE" : "tudo categorizado"}
-          tone={pendentes > 0 ? "warning" : "success"}
+          label="Sem categoria no mês"
+          value={String(totais.semCategoria)}
+          hint={totais.semCategoria > 0 ? "clique para ver só essas" : "tudo categorizado"}
+          tone={totais.semCategoria > 0 ? "warning" : "success"}
+          href={totais.semCategoria > 0 ? hrefExtrato({ mes, categoria: "sem", visao: filtro.visao }) : undefined}
         />
       </div>
 
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-1">
-          <Link
-            href={hrefExtrato({ ...filtro, mes: deslocarMes(mes, -1) })}
-            aria-label="Mês anterior"
-            className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary"
-          >
-            <ChevronLeft className="size-4" />
-          </Link>
-          <p className="min-w-40 text-center text-sm font-medium text-foreground">{rotuloMes(mes)}</p>
-          {mes < hoje ? (
-            <Link
-              href={hrefExtrato({ ...filtro, mes: deslocarMes(mes, 1) })}
-              aria-label="Próximo mês"
-              className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary"
-            >
-              <ChevronRight className="size-4" />
-            </Link>
-          ) : (
-            <span className="p-1.5 text-muted-foreground/30">
-              <ChevronRight className="size-4" />
-            </span>
-          )}
-        </div>
+      <FiltrosExtrato
+        filtro={filtro}
+        mesCorrente={hoje}
+        meses={[...meses].reverse()}
+        categorias={opcoes}
+        centros={opcoesCentro}
+        contas={contas.map((c) => ({ id: c.id, nome: c.nome }))}
+      />
 
-        <div className="flex flex-wrap gap-1.5">
-          <Chip href={hrefExtrato({ ...filtro, sem: !semCategoria, categoria: undefined })} ativo={semCategoria}>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <GrupoChips>
+          <Chip href={hrefExtrato({ ...filtro, visao: undefined })} ativo={!porNome}>
+            Lançamentos
+          </Chip>
+          <Chip href={hrefExtrato({ ...filtro, visao: "nomes" })} ativo={porNome}>
+            Por nome
+          </Chip>
+          <span className="mx-1 h-4 w-px bg-border" aria-hidden />
+          <Chip
+            href={hrefExtrato({ ...filtro, categoria: filtro.categoria === "sem" ? undefined : "sem" })}
+            ativo={filtro.categoria === "sem"}
+          >
             Só sem categoria
           </Chip>
-          {categoriaFiltrada ? (
-            <Chip href={hrefExtrato({ ...filtro, categoria: undefined })} ativo>
-              {categoriaFiltrada.nome}
-              <X className="size-3" />
-            </Chip>
+        </GrupoChips>
+        <p className="text-xs text-muted-foreground">
+          {porNome ? `${grupos.length} nome(s) · ` : ""}
+          {linhas.length} lançamento(s){filtrando ? " nesta seleção" : ` em ${rotuloMes(mes).toLowerCase()}`}
+          {linhas.length > 0 ? (
+            <>
+              {" "}· <span className="text-on-success-soft">{formatarCentavos(entradasFiltro)}</span> entradas ·{" "}
+              <span className="text-foreground">{formatarCentavos(-saidasFiltro)}</span> saídas
+            </>
           ) : null}
-          {contas.length > 1
-            ? [{ id: undefined, nome: "Todas as contas" }, ...contas].map((c) => (
-                <Chip key={c.id ?? "todas"} href={hrefExtrato({ ...filtro, conta: c.id })} ativo={c.id === contaId}>
-                  {c.nome}
-                </Chip>
-              ))
-            : null}
-        </div>
+        </p>
       </div>
 
       {linhas.length === 0 ? (
         <EmptyState
           icon={Landmark}
-          title={semCategoria ? "Nada sem categoria neste mês" : "Nenhuma movimentação neste mês"}
+          title={filtrando ? "Nada com esses filtros" : "Nenhuma movimentação neste mês"}
           description={
-            semCategoria
-              ? "Todas as movimentações do mês já têm categoria."
+            filtrando
+              ? "Tire um filtro ou mude a busca. O resumo acima é do mês inteiro."
               : "Se o banco foi conectado agora, o histórico disponível no Open Finance já foi puxado — confira os meses anteriores."
           }
+          actionHref={filtrando ? hrefExtrato({ mes, visao: filtro.visao }) : undefined}
+          actionLabel={filtrando ? "Limpar filtros" : undefined}
         />
+      ) : porNome ? (
+        <Card className="overflow-hidden py-0">
+          <Table className="min-w-[900px]">
+            <TableHeader>
+              <TableRow>
+                <TableHead>Nome</TableHead>
+                <TableHead className="text-right">Lançamentos</TableHead>
+                <TableHead className="text-right">Total</TableHead>
+                <TableHead>Categoria e centro</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {grupos.map((g) => (
+                <TableRow key={g.exemplo.id}>
+                  <TableCell className="max-w-72 whitespace-normal">
+                    <NomeEditavel
+                      key={`${g.exemplo.id}-${g.exemplo.nomeExibicao ?? ""}`}
+                      movimentacaoId={g.exemplo.id}
+                      descricao={g.descricao}
+                      nomeExibicao={g.exemplo.nomeExibicao}
+                    />
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {g.exemplo.contraparte ?? null}
+                      {g.exemplo.contraparteDocumento ? (
+                        <span className="ml-1 font-mono">{formatarDocumento(g.exemplo.contraparteDocumento)}</span>
+                      ) : null}
+                      {!g.exemplo.contraparte && !g.exemplo.contraparteDocumento ? "sem contraparte" : null}
+                    </p>
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    <Link
+                      href={hrefExtrato({ ...filtro, visao: undefined, q: g.busca })}
+                      scroll={false}
+                      className="text-foreground underline-offset-2 hover:underline"
+                      title="Ver os lançamentos"
+                    >
+                      {g.quantidade}
+                    </Link>
+                    <span className="block text-xs text-muted-foreground">último em {rotuloDia(g.ultimaData)}</span>
+                  </TableCell>
+                  <TableCell
+                    className={cn("text-right font-medium tabular-nums", g.totalCentavos > 0 ? "text-on-success-soft" : "text-foreground")}
+                  >
+                    {formatarCentavos(g.totalCentavos)}
+                  </TableCell>
+                  <TableCell>
+                    <CategoriaSelect
+                      key={`${g.exemplo.id}-${g.exemplo.categoriaId ?? "sem"}-${g.exemplo.categorizadaPor ?? ""}`}
+                      movimentacaoId={g.exemplo.id}
+                      categoriaId={g.exemplo.categoriaId}
+                      categoriaNome={g.exemplo.categoriaNome}
+                      origem={g.exemplo.categorizadaPor}
+                      regraId={g.exemplo.regraId}
+                      opcoes={opcoes}
+                      permitirSoNesta={false}
+                    />
+                    {g.exemplo.categoriaId ? (
+                      <CentroSelect
+                        key={`${g.exemplo.id}-${g.exemplo.centroCustoId ?? ""}-${g.exemplo.categoriaCentroId ?? ""}`}
+                        movimentacaoId={g.exemplo.id}
+                        centroId={g.exemplo.centroCustoId}
+                        centroPadraoId={g.exemplo.categoriaCentroId}
+                        centros={opcoesCentro}
+                      />
+                    ) : null}
+                    {g.semCategoria > 0 && g.semCategoria < g.quantidade ? (
+                      <p className="mt-1 text-xs text-on-warning-soft">{g.semCategoria} sem categoria</p>
+                    ) : null}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </Card>
       ) : (
         <Card className="overflow-hidden py-0">
           <Table className="min-w-[900px]">
             <TableHeader>
               <TableRow>
-                <TableHead>Data</TableHead>
-                <TableHead>Nome</TableHead>
+                <CabecalhoOrdenavel filtro={filtro} ordem="data">
+                  Data
+                </CabecalhoOrdenavel>
+                <CabecalhoOrdenavel filtro={filtro} ordem="nome">
+                  Nome
+                </CabecalhoOrdenavel>
                 <TableHead>Contraparte</TableHead>
                 <TableHead>Categoria e centro</TableHead>
-                <TableHead className="text-right">Valor</TableHead>
+                <CabecalhoOrdenavel filtro={filtro} ordem="valor" className="text-right">
+                  Valor
+                </CabecalhoOrdenavel>
               </TableRow>
             </TableHeader>
             <TableBody>
               {linhas.map((l) => (
                 <TableRow key={l.id}>
-                  <TableCell className="tabular-nums text-muted-foreground">
-                    {DATA.format(new Date(`${l.data}T00:00:00Z`))}
-                  </TableCell>
+                  <TableCell className="tabular-nums text-muted-foreground">{rotuloDia(l.data)}</TableCell>
                   <TableCell className="max-w-64 whitespace-normal">
                     <NomeEditavel
                       // Remonta quando a edição de uma linha igual renomeia esta no servidor.

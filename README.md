@@ -7,27 +7,41 @@ contas próprias da Safran (GitHub, Vercel, Supabase, Pluggy).
 
 ## Como funciona
 
-1. **Extrato** (`/extrato`) — a conta é conectada pelo widget da Pluggy
-   (*Conectar banco*) e sincronizada todo dia às 07:00 (Maceió), a cada aviso
-   do banco (webhook) ou pelo botão *Sincronizar agora*.
-2. **Categorização** — no extrato, cada linha tem nome (clique para editar;
-   o padrão é a descrição do banco), categoria e centro de custo. Editar
-   qualquer um deles vale para todas as linhas **iguais** — mesmo CPF/CNPJ,
-   senão mesma contraparte, senão mesma descrição, no mesmo sentido —,
-   passadas e futuras: a edição vira uma regra. *Só nesta* faz a exceção
-   (escolha manual, que regra nenhuma muda).
-3. **Configurações** (`/configuracoes`) — a estrutura da DRE é editável:
+1. **Início** (`/`) — o resumo do mês em andamento: saldo em conta, receita e
+   resultado comparados com o mês anterior **até o mesmo dia**, pendências
+   (sem categoria, conexão a reconectar, extrato parado), gráfico de receita
+   e resultado dos últimos 12 meses, as maiores despesas do mês e os últimos
+   lançamentos.
+2. **Extrato** (`/extrato`) — as movimentações do mês, com busca (nome,
+   descrição, contraparte ou CPF/CNPJ, sem acento; atalho `/`), filtros
+   (entradas/saídas, categoria, centro de custo, conta), ordenação por data,
+   nome ou valor e duas visões: *Lançamentos* (uma linha por movimentação) e
+   *Por nome* (uma linha por grupo de iguais, com quantidade e total — o
+   jeito rápido de categorizar em massa). Tudo fica na URL. Os cartões do
+   topo são sempre do mês inteiro; o resumo da seleção fica junto dos filtros.
+3. **Categorização** — cada linha tem nome (clique para editar; o padrão é
+   a descrição do banco), categoria e centro de custo. Editar qualquer um
+   deles vale para todas as linhas **iguais** — mesmo CPF/CNPJ, senão mesma
+   contraparte, senão mesma descrição, no mesmo sentido —, passadas e
+   futuras: a edição vira uma regra. *Só nesta* faz a exceção (escolha
+   manual, que regra nenhuma muda).
+4. **Configurações** (`/configuracoes`) — a estrutura da DRE é editável:
    linhas (grupos que somam categorias e subtotais que somam tudo acima),
-   categorias de cada linha com o centro de custo padrão, centros de custo e
-   as regras (categoria, nome de exibição e centro de cada uma).
-4. **DRE** (`/dre`) — regime de caixa, mês a mês, na estrutura configurada
+   categorias de cada linha com o centro de custo padrão, centros de custo,
+   as regras (categoria, nome de exibição e centro de cada uma) e a
+   **conexão bancária**: a conta é conectada pelo widget da Pluggy
+   (*Conectar banco*) e sincronizada todo dia às 07:00 (Maceió), a cada
+   aviso do banco (webhook) ou pelo botão *Sincronizar agora*.
+5. **DRE** (`/dre`) — regime de caixa, mês a mês, na estrutura configurada
    (a inicial: receita bruta − deduções = receita líquida − custos variáveis
    = **margem de contribuição** − despesas fixas = resultado operacional ±
-   financeiro = **resultado líquido**). Filtra por centro de custo. Cada
-   valor leva às movimentações dele.
-5. **Fluxo de caixa** (`/fluxo-de-caixa`) — saldo inicial, operação (o
-   resultado da DRE), cada linha de fora da DRE e saldo final. Os saldos são
-   reconstruídos de trás para frente a partir do saldo de hoje.
+   financeiro = **resultado líquido**). Período por ano civil ou últimos 12
+   meses, filtro por centro de custo, *Só totais* esconde as categorias e o
+   mês corrente fica em destaque. Cada valor leva às movimentações dele.
+6. **Fluxo de caixa** (`/fluxo-de-caixa`) — saldo inicial, operação (o
+   resultado da DRE), cada linha de fora da DRE e saldo final, no mesmo
+   período da DRE. Os saldos são reconstruídos de trás para frente a partir
+   do saldo de hoje.
 
 Investimentos, empréstimos (entrada e parcelas), aportes/retiradas de sócios e
 transferências entre contas próprias ficam **fora da DRE**: mexem no caixa,
@@ -81,6 +95,7 @@ npm run usuario:criar -- email@dominio.com "Nome"   # mostra a senha provisória
 
 - `src/lib/pluggy/` — cliente da API, regra de sinal (`movimentacoes.ts`) e sync
 - `src/lib/regras.ts` — motor de categorização (puro)
-- `src/lib/dre.ts` — DRE e saldos (puro)
+- `src/lib/dre.ts` — DRE e saldos (puro); `src/lib/resumo.ts` — os números da tela inicial
+- `src/lib/extrato-filtros.ts` — os filtros do extrato na URL; `src/lib/extrato.ts` — visão por nome
 - `src/lib/categorizacao.ts` — aplica as regras no banco
 - `src/app/api/cron/pluggy`, `src/app/api/webhooks/pluggy` — sync automático

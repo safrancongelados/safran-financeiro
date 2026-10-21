@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, isNull, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, isNull, lt, lte, or, sql, type SQL } from "drizzle-orm";
 import { db } from "@/db";
 import {
   categorias,
@@ -10,8 +10,10 @@ import {
   regrasCategorizacao,
 } from "@/db/schema";
 import type { CategoriaDre, LinhaDreConfig, SomaMensal } from "@/lib/dre";
-import { regraCasa, type RegraAplicavel } from "@/lib/regras";
-import { intervaloDoMes } from "@/lib/periodo";
+import type { FiltroExtrato } from "@/lib/extrato-filtros";
+import { DIRECAO_PADRAO } from "@/lib/extrato-filtros";
+import { normalizarTexto, regraCasa, type RegraAplicavel } from "@/lib/regras";
+import { intervaloDoMes, mesmoDiaEm } from "@/lib/periodo";
 
 export type ContaBancaria = typeof contasBancarias.$inferSelect;
 export type ConexaoBancaria = typeof conexoesBancarias.$inferSelect & { contas: ContaBancaria[] };
@@ -84,15 +86,81 @@ export async function contarPorRegra(regras: RegraAplicavel[]): Promise<Map<stri
   return new Map(regras.map((r) => [r.id, movs.filter((m) => regraCasa(r, m)).length]));
 }
 
-export interface FiltroExtrato {
-  contaId?: string;
-  categoriaId?: string;
-  semCategoria?: boolean;
+// DRE e fluxo de caixa contam só contas (BANK). No cartão o dinheiro sai
+// quando a fatura é paga, e esse pagamento já aparece na conta.
+const SO_CONTAS = eq(contasBancarias.tipo, "BANK");
+const MES = sql<string>`to_char(${movimentacoesBancarias.data}, 'YYYY-MM')`;
+
+/** Minúsculo e sem acento, no Postgres — o par de `normalizarTexto` para a busca. */
+const semAcento = (coluna: SQL | typeof movimentacoesBancarias.descricao) =>
+  sql`translate(lower(${coluna}), 'áàâãäéèêëíìîïóòôõöúùûüçñ', 'aaaaaeeeeiiiiooooouuuucn')`;
+
+/** Trecho para LIKE, com os curingas do termo escapados. */
+function trecho(termo: string): string {
+  return `%${termo.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
 }
 
-/** Movimentações de um mês, mais recentes primeiro. Sem o payload bruto, que é pesado. */
-export async function listarMovimentacoesDoMes(mes: string, filtro: FiltroExtrato = {}) {
-  const { inicio, fim } = intervaloDoMes(mes);
+/**
+ * A condição da busca livre: nome de exibição, descrição ou contraparte
+ * contendo o texto (sem acento nem caixa); com dígitos, também o CPF/CNPJ.
+ */
+function condicaoBusca(q: string): SQL | undefined {
+  const termo = normalizarTexto(q);
+  if (!termo) return undefined;
+  const t = trecho(termo);
+  const partes: SQL[] = [
+    sql`${semAcento(movimentacoesBancarias.descricao)} like ${t}`,
+    sql`${semAcento(sql`coalesce(${movimentacoesBancarias.contraparte}, '')`)} like ${t}`,
+    sql`${semAcento(sql`coalesce(${movimentacoesBancarias.nomeExibicao}, '')`)} like ${t}`,
+  ];
+  const digitos = q.replace(/\D/g, "");
+  if (digitos.length >= 4) partes.push(sql`coalesce(${movimentacoesBancarias.contraparteDocumento}, '') like ${trecho(digitos)}`);
+  return or(...partes);
+}
+
+function condicoesDoFiltro(filtro: FiltroExtrato): (SQL | undefined)[] {
+  const { inicio, fim } = intervaloDoMes(filtro.mes);
+  return [
+    gte(movimentacoesBancarias.data, inicio),
+    lt(movimentacoesBancarias.data, fim),
+    filtro.conta ? eq(movimentacoesBancarias.contaId, filtro.conta) : undefined,
+    filtro.categoria === "sem"
+      ? isNull(movimentacoesBancarias.categoriaId)
+      : filtro.categoria
+        ? eq(movimentacoesBancarias.categoriaId, filtro.categoria)
+        : undefined,
+    filtro.centro === "sem"
+      ? isNull(movimentacoesBancarias.centroCustoId)
+      : filtro.centro
+        ? eq(movimentacoesBancarias.centroCustoId, filtro.centro)
+        : undefined,
+    filtro.tipo === "entrada"
+      ? gte(movimentacoesBancarias.valorCentavos, 0)
+      : filtro.tipo === "saida"
+        ? lt(movimentacoesBancarias.valorCentavos, 0)
+        : undefined,
+    filtro.q ? condicaoBusca(filtro.q) : undefined,
+  ];
+}
+
+function ordenacao(filtro: FiltroExtrato): SQL[] {
+  const ordem = filtro.ordem ?? "data";
+  const dir = filtro.dir ?? DIRECAO_PADRAO[ordem];
+  const sentido = dir === "asc" ? asc : desc;
+  const porData = [desc(movimentacoesBancarias.data), desc(movimentacoesBancarias.createdAt)];
+  switch (ordem) {
+    case "valor":
+      // Pelo tamanho, não pelo sinal: "maiores primeiro" mistura entradas e saídas.
+      return [sentido(sql`abs(${movimentacoesBancarias.valorCentavos})`), ...porData];
+    case "nome":
+      return [sentido(semAcento(sql`coalesce(${movimentacoesBancarias.nomeExibicao}, ${movimentacoesBancarias.descricao})`)), ...porData];
+    default:
+      return [sentido(movimentacoesBancarias.data), sentido(movimentacoesBancarias.createdAt)];
+  }
+}
+
+/** Movimentações do mês que passam pelo filtro, na ordem pedida (padrão: mais recentes primeiro). Sem o payload bruto, que é pesado. */
+export async function listarMovimentacoesDoMes(filtro: FiltroExtrato) {
   return db
     .select({
       id: movimentacoesBancarias.id,
@@ -120,24 +188,74 @@ export async function listarMovimentacoesDoMes(mes: string, filtro: FiltroExtrat
     .innerJoin(contasBancarias, eq(movimentacoesBancarias.contaId, contasBancarias.id))
     .leftJoin(categorias, eq(movimentacoesBancarias.categoriaId, categorias.id))
     .leftJoin(linhasDre, eq(categorias.linhaId, linhasDre.id))
-    .where(
-      and(
-        gte(movimentacoesBancarias.data, inicio),
-        lt(movimentacoesBancarias.data, fim),
-        filtro.contaId ? eq(movimentacoesBancarias.contaId, filtro.contaId) : undefined,
-        filtro.categoriaId ? eq(movimentacoesBancarias.categoriaId, filtro.categoriaId) : undefined,
-        filtro.semCategoria ? isNull(movimentacoesBancarias.categoriaId) : undefined
-      )
-    )
-    .orderBy(desc(movimentacoesBancarias.data), desc(movimentacoesBancarias.createdAt));
+    .where(and(...condicoesDoFiltro(filtro)))
+    .orderBy(...ordenacao(filtro));
 }
 
 export type MovimentacaoLinha = Awaited<ReturnType<typeof listarMovimentacoesDoMes>>[number];
 
-// DRE e fluxo de caixa contam só contas (BANK). No cartão o dinheiro sai
-// quando a fatura é paga, e esse pagamento já aparece na conta.
-const SO_CONTAS = eq(contasBancarias.tipo, "BANK");
-const MES = sql<string>`to_char(${movimentacoesBancarias.data}, 'YYYY-MM')`;
+export interface TotaisDoMes {
+  /** Entradas e saídas do caixa: só contas (não cartão) e sem transferência entre contas próprias. */
+  entradasCentavos: number;
+  saidasCentavos: number;
+  lancamentos: number;
+  semCategoria: number;
+}
+
+/** Os números do mês inteiro, independentes do filtro da tela. */
+export async function totaisDoMes(mes: string): Promise<TotaisDoMes> {
+  const { inicio, fim } = intervaloDoMes(mes);
+  const doCaixa = sql`${contasBancarias.tipo} = 'BANK' and coalesce(${linhasDre.secao}, 'dre') <> 'transferencia'`;
+  const [r] = await db
+    .select({
+      entradas: sql<string>`coalesce(sum(${movimentacoesBancarias.valorCentavos}) filter (where ${doCaixa} and ${movimentacoesBancarias.valorCentavos} > 0), 0)`,
+      saidas: sql<string>`coalesce(sum(${movimentacoesBancarias.valorCentavos}) filter (where ${doCaixa} and ${movimentacoesBancarias.valorCentavos} < 0), 0)`,
+      lancamentos: sql<number>`count(*)::int`,
+      semCategoria: sql<number>`count(*) filter (where ${movimentacoesBancarias.categoriaId} is null)::int`,
+    })
+    .from(movimentacoesBancarias)
+    .innerJoin(contasBancarias, eq(movimentacoesBancarias.contaId, contasBancarias.id))
+    .leftJoin(categorias, eq(movimentacoesBancarias.categoriaId, categorias.id))
+    .leftJoin(linhasDre, eq(categorias.linhaId, linhasDre.id))
+    .where(and(gte(movimentacoesBancarias.data, inicio), lt(movimentacoesBancarias.data, fim)));
+  return {
+    entradasCentavos: Number(r?.entradas ?? 0),
+    saidasCentavos: Number(r?.saidas ?? 0),
+    lancamentos: r?.lancamentos ?? 0,
+    semCategoria: r?.semCategoria ?? 0,
+  };
+}
+
+/** Os meses (YYYY-MM) em que houve movimento em conta, do mais antigo ao mais novo. */
+export async function mesesComMovimento(): Promise<string[]> {
+  const linhas = await db
+    .selectDistinct({ mes: MES })
+    .from(movimentacoesBancarias)
+    .innerJoin(contasBancarias, eq(movimentacoesBancarias.contaId, contasBancarias.id))
+    .where(SO_CONTAS)
+    .orderBy(MES);
+  return linhas.map((l) => l.mes);
+}
+
+/** As últimas movimentações em conta, para a tela inicial. */
+export async function listarMovimentacoesRecentes(limite: number) {
+  return db
+    .select({
+      id: movimentacoesBancarias.id,
+      data: movimentacoesBancarias.data,
+      descricao: movimentacoesBancarias.descricao,
+      nomeExibicao: movimentacoesBancarias.nomeExibicao,
+      valorCentavos: movimentacoesBancarias.valorCentavos,
+      categoriaId: movimentacoesBancarias.categoriaId,
+      categoriaNome: categorias.nome,
+    })
+    .from(movimentacoesBancarias)
+    .innerJoin(contasBancarias, eq(movimentacoesBancarias.contaId, contasBancarias.id))
+    .leftJoin(categorias, eq(movimentacoesBancarias.categoriaId, categorias.id))
+    .where(SO_CONTAS)
+    .orderBy(desc(movimentacoesBancarias.data), desc(movimentacoesBancarias.createdAt))
+    .limit(limite);
+}
 
 /**
  * Soma por mês e categoria no intervalo [inicio, fim) — a matéria-prima da
@@ -167,6 +285,23 @@ export async function somasPorMesECategoria(inicio: string, fim: string, centro?
     .groupBy(MES, movimentacoesBancarias.categoriaId);
   // sum() de integer volta bigint, que o driver entrega como texto.
   return linhas.map((l) => ({ ...l, valorCentavos: Number(l.valorCentavos) }));
+}
+
+/**
+ * Soma por categoria de um mês só até o dia `dia` (inclusive) — para comparar
+ * o mês em andamento com o anterior no mesmo ponto.
+ */
+export async function somasAteODia(mes: string, dia: number): Promise<SomaMensal[]> {
+  const linhas = await db
+    .select({
+      categoriaId: movimentacoesBancarias.categoriaId,
+      valorCentavos: sql<string>`sum(${movimentacoesBancarias.valorCentavos})`,
+    })
+    .from(movimentacoesBancarias)
+    .innerJoin(contasBancarias, eq(movimentacoesBancarias.contaId, contasBancarias.id))
+    .where(and(SO_CONTAS, gte(movimentacoesBancarias.data, `${mes}-01`), lte(movimentacoesBancarias.data, mesmoDiaEm(mes, dia))))
+    .groupBy(movimentacoesBancarias.categoriaId);
+  return linhas.map((l) => ({ mes, categoriaId: l.categoriaId, valorCentavos: Number(l.valorCentavos) }));
 }
 
 /** Variação total por mês a partir de `inicio`, até hoje — para reconstruir os saldos. */

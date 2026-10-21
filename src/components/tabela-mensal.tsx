@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { Serie } from "@/lib/dre";
 import { formatarCentavos, formatarPercentual } from "@/lib/dinheiro";
-import { rotuloMesCurto } from "@/lib/periodo";
+import { rotuloMesAno, rotuloMesCurto } from "@/lib/periodo";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
@@ -26,10 +26,24 @@ function Valor({ centavos, forte }: { centavos: number; forte?: boolean }) {
 
 /**
  * Tabela mês a mês da DRE e do fluxo de caixa. O rótulo fica preso à esquerda
- * para a tabela rolar de lado no celular sem perder a linha.
+ * para a tabela rolar de lado no celular sem perder a linha. `mesDestaque`
+ * (o mês corrente) ganha uma coluna tingida: ainda vai mudar.
  */
-export function TabelaMensal({ meses, linhas, comTotal = true }: { meses: string[]; linhas: LinhaTabela[]; comTotal?: boolean }) {
+export function TabelaMensal({
+  meses,
+  linhas,
+  comTotal = true,
+  mesDestaque,
+}: {
+  meses: string[];
+  linhas: LinhaTabela[];
+  comTotal?: boolean;
+  mesDestaque?: string;
+}) {
   const colunas = meses.length + (comTotal ? 2 : 1);
+  // Quando o período cruza o ano, o ano entra no cabeçalho.
+  const cruzaAno = new Set(meses.map((m) => m.slice(0, 4))).size > 1;
+  const celula = (m: string) => (m === mesDestaque ? "bg-primary/5" : undefined);
 
   return (
     <Card className="overflow-hidden py-0">
@@ -39,11 +53,17 @@ export function TabelaMensal({ meses, linhas, comTotal = true }: { meses: string
             <tr className="border-b border-border bg-secondary/60 text-xs uppercase tracking-wide text-muted-foreground">
               <th className="sticky left-0 z-10 bg-secondary px-4 py-2.5 text-left font-semibold">&nbsp;</th>
               {meses.map((m) => (
-                <th key={m} className="whitespace-nowrap px-3 py-2.5 text-right font-semibold">
-                  {rotuloMesCurto(m)}
+                <th
+                  key={m}
+                  scope="col"
+                  className={cn("whitespace-nowrap px-3 py-2.5 text-right font-semibold", m === mesDestaque && "bg-primary/5 text-foreground")}
+                  title={m === mesDestaque ? "Mês corrente, ainda em andamento" : undefined}
+                >
+                  {cruzaAno ? rotuloMesAno(m) : rotuloMesCurto(m)}
+                  {m === mesDestaque ? <span className="ml-1 text-primary" aria-hidden>•</span> : null}
                 </th>
               ))}
-              {comTotal ? <th className="whitespace-nowrap px-4 py-2.5 text-right font-semibold">Total</th> : null}
+              {comTotal ? <th scope="col" className="whitespace-nowrap px-4 py-2.5 text-right font-semibold">Total</th> : null}
             </tr>
           </thead>
           <tbody>
@@ -63,7 +83,7 @@ export function TabelaMensal({ meses, linhas, comTotal = true }: { meses: string
                   <tr key={i} className="border-b border-border text-xs text-muted-foreground">
                     <td className="sticky left-0 min-w-36 max-w-44 sm:max-w-none sm:whitespace-nowrap bg-card px-4 py-1.5 pl-8 italic">{linha.label}</td>
                     {meses.map((m) => (
-                      <td key={m} className="whitespace-nowrap px-3 py-1.5 text-right tabular-nums">
+                      <td key={m} className={cn("whitespace-nowrap px-3 py-1.5 text-right tabular-nums", celula(m))}>
                         {formatarPercentual(linha.parte.porMes[m] ?? 0, linha.base.porMes[m] ?? 0)}
                       </td>
                     ))}
@@ -81,7 +101,7 @@ export function TabelaMensal({ meses, linhas, comTotal = true }: { meses: string
                   <tr key={i} className="border-b border-border bg-secondary/40 font-semibold">
                     <td className="sticky left-0 min-w-36 max-w-44 sm:max-w-none sm:whitespace-nowrap bg-secondary px-4 py-2.5">{linha.label}</td>
                     {meses.map((m) => (
-                      <td key={m} className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums">
+                      <td key={m} className={cn("whitespace-nowrap px-3 py-2.5 text-right tabular-nums", celula(m))}>
                         {linha.porMes[m] === null || linha.porMes[m] === undefined ? (
                           <span className="text-muted-foreground/50">—</span>
                         ) : (
@@ -123,7 +143,7 @@ export function TabelaMensal({ meses, linhas, comTotal = true }: { meses: string
                   {meses.map((m) => {
                     const v = linha.serie.porMes[m] ?? 0;
                     return (
-                      <td key={m} className="whitespace-nowrap px-3 py-2 text-right tabular-nums">
+                      <td key={m} className={cn("whitespace-nowrap px-3 py-2 text-right tabular-nums", celula(m))}>
                         {linha.href && v !== 0 ? (
                           <Link href={linha.href(m)} className="hover:underline">
                             <Valor centavos={v} forte={forte} />

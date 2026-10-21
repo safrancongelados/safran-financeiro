@@ -3,21 +3,22 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BarChart3, Landmark, LogOut, Menu, Receipt, KeyRound, Settings, X } from "lucide-react";
+import { BarChart3, Landmark, LayoutDashboard, LogOut, Menu, Receipt, KeyRound, Settings, X } from "lucide-react";
 import { logoutAction } from "@/actions/auth";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 const LINKS = [
+  { href: "/", label: "Início", icon: LayoutDashboard, exato: true },
+  { href: "/extrato", label: "Extrato", icon: Receipt },
   { href: "/dre", label: "DRE", icon: BarChart3 },
   { href: "/fluxo-de-caixa", label: "Fluxo de caixa", icon: Landmark },
-  { href: "/extrato", label: "Extrato", icon: Receipt },
   { href: "/configuracoes", label: "Configurações", icon: Settings },
 ];
 
 function Brand() {
   return (
-    <div className="flex items-center gap-2.5 px-2">
+    <Link href="/" className="flex items-center gap-2.5 px-2">
       <div className="flex size-8 items-center justify-center rounded-lg bg-primary text-sm font-bold text-primary-foreground">
         S
       </div>
@@ -25,22 +26,23 @@ function Brand() {
         <p className="text-sm font-semibold leading-tight text-foreground">Safran</p>
         <p className="text-[11px] leading-tight text-muted-foreground">Financeiro</p>
       </div>
-    </div>
+    </Link>
   );
 }
 
 function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
   return (
-    <nav className="flex flex-col gap-0.5">
+    <nav aria-label="Principal" className="flex flex-col gap-0.5">
       {LINKS.map((link) => {
-        const ativo = pathname.startsWith(link.href);
+        const ativo = link.exato ? pathname === link.href : pathname.startsWith(link.href);
         const Icon = link.icon;
         return (
           <Link
             key={link.href}
             href={link.href}
             onClick={onNavigate}
+            aria-current={ativo ? "page" : undefined}
             className={cn(
               "flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-colors",
               ativo
@@ -53,30 +55,26 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
           </Link>
         );
       })}
-
-      <Link
-        href="/senha"
-        onClick={onNavigate}
-        className="mt-2 flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground"
-      >
-        <KeyRound className="size-4.5 shrink-0" />
-        Trocar senha
-      </Link>
     </nav>
   );
 }
 
 function UserFooter({ nome }: { nome: string }) {
   return (
-    <div className="flex items-center justify-between gap-2 px-2">
-      <div className="min-w-0">
-        <p className="truncate text-sm font-medium text-foreground">{nome}</p>
-      </div>
-      <form action={logoutAction}>
-        <Button type="submit" variant="ghost" size="icon" title="Sair" className="text-muted-foreground">
-          <LogOut className="size-4" />
+    <div className="flex items-center justify-between gap-1 px-2">
+      <p className="min-w-0 truncate text-sm font-medium text-foreground">{nome}</p>
+      <div className="flex shrink-0 items-center">
+        <Button asChild variant="ghost" size="icon" title="Trocar senha" className="text-muted-foreground">
+          <Link href="/senha" aria-label="Trocar senha">
+            <KeyRound className="size-4" />
+          </Link>
         </Button>
-      </form>
+        <form action={logoutAction}>
+          <Button type="submit" variant="ghost" size="icon" title="Sair" aria-label="Sair" className="text-muted-foreground">
+            <LogOut className="size-4" />
+          </Button>
+        </form>
+      </div>
     </div>
   );
 }

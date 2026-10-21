@@ -105,6 +105,7 @@ export function CategoriaSelect({
   origem,
   regraId,
   opcoes,
+  permitirSoNesta = true,
 }: {
   movimentacaoId: string;
   categoriaId: string | null;
@@ -113,6 +114,8 @@ export function CategoriaSelect({
   /** Regra que deu a categoria; o selo "auto" leva até ela. */
   regraId: string | null;
   opcoes: GrupoOpcoes[];
+  /** Na visão por nome a linha representa o grupo inteiro: a exceção não faz sentido ali. */
+  permitirSoNesta?: boolean;
 }) {
   const [valor, setValor] = useState(categoriaId ?? "");
   const [pendente, startTransition] = useTransition();
@@ -132,7 +135,7 @@ export function CategoriaSelect({
       toast.success(aviso("Categoria salva", r.iguais), {
         duration: 10000,
         action:
-          r.iguais && desfazer
+          permitirSoNesta && r.iguais && desfazer
             ? {
                 label: "Só nesta",
                 onClick: async () => {

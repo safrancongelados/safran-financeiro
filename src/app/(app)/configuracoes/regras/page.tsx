@@ -44,7 +44,7 @@ export default async function RegrasPage() {
       {semCategoria > 0 ? (
         <p className="mb-4 text-sm text-on-warning-soft">
           {semCategoria} movimentação(ões) ainda sem categoria.{" "}
-          <Link href="/extrato?sem=1" className="font-medium underline">
+          <Link href="/extrato?categoria=sem" className="font-medium underline">
             Ver no extrato
           </Link>
         </p>
