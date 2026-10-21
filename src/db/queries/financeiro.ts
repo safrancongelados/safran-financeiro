@@ -41,6 +41,7 @@ export async function listarLinhasDre(): Promise<LinhaDreConfig[]> {
       ordem: linhasDre.ordem,
       basePercentual: linhasDre.basePercentual,
       mostrarPercentual: linhasDre.mostrarPercentual,
+      papel: linhasDre.papel,
     })
     .from(linhasDre)
     .orderBy(asc(linhasDre.ordem), asc(linhasDre.nome));

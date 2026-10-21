@@ -1,10 +1,15 @@
 /** Opções dos seletores de categoria e centro de custo — sem I/O. */
-import type { SecaoDre } from "@/db/schema";
+import type { PapelLinhaDre, SecaoDre } from "@/db/schema";
 
 export const SECAO_LABEL: Record<SecaoDre, string> = {
   dre: "Na DRE",
   caixa: "Fora da DRE (só caixa)",
   transferencia: "Transferência entre contas",
+};
+
+export const PAPEL_LABEL: Record<PapelLinhaDre, string> = {
+  margem: "margem de contribuição",
+  operacional: "resultado operacional",
 };
 
 export interface GrupoOpcoes {

@@ -26,6 +26,12 @@ export const tipoLinhaDreEnum = pgEnum("tipo_linha_dre", ["grupo", "subtotal"]);
  * de conta da própria Safran — fora da DRE e das entradas/saídas do extrato.
  */
 export const secaoDreEnum = pgEnum("secao_dre", ["dre", "caixa", "transferencia"]);
+/**
+ * Subtotal que alimenta os indicadores: `margem` é a margem de contribuição e
+ * `operacional` o resultado operacional. Custos fixos = margem − operacional;
+ * ponto de equilíbrio = custos fixos mensais ÷ margem %. Só um de cada.
+ */
+export const papelLinhaDreEnum = pgEnum("papel_linha_dre", ["margem", "operacional"]);
 
 /** Em que campo da movimentação a regra procura o padrão. */
 export const campoRegraEnum = pgEnum("campo_regra", ["documento", "contraparte", "descricao"]);
@@ -52,6 +58,8 @@ export const linhasDre = pgTable("linhas_dre", {
   basePercentual: boolean("base_percentual").notNull().default(false),
   /** Subtotal que mostra, embaixo, quanto é da linha base. */
   mostrarPercentual: boolean("mostrar_percentual").notNull().default(false),
+  /** Subtotal usado nos indicadores (ver `papelLinhaDreEnum`). Nulo = nenhum. */
+  papel: papelLinhaDreEnum("papel"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -196,6 +204,7 @@ export const movimentacoesBancarias = pgTable(
 
 export type TipoLinhaDre = (typeof tipoLinhaDreEnum.enumValues)[number];
 export type SecaoDre = (typeof secaoDreEnum.enumValues)[number];
+export type PapelLinhaDre = (typeof papelLinhaDreEnum.enumValues)[number];
 export type LinhaDre = typeof linhasDre.$inferSelect;
 export type CentroCusto = typeof centrosCusto.$inferSelect;
 export type CampoRegra = (typeof campoRegraEnum.enumValues)[number];

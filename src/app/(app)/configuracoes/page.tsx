@@ -1,7 +1,7 @@
 import { Trash2 } from "lucide-react";
 import { excluirLinhaAction, moverCategoriaAction, moverLinhaAction } from "@/actions/configuracoes";
 import { listarCategorias, listarCentrosCusto, listarLinhasDre } from "@/db/queries/financeiro";
-import { opcoesDeCentro, SECAO_LABEL } from "@/lib/opcoes";
+import { opcoesDeCentro, PAPEL_LABEL, SECAO_LABEL } from "@/lib/opcoes";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -28,7 +28,9 @@ export default async function EstruturaDrePage() {
             De cima para baixo, na ordem abaixo. Uma linha de <strong>grupo</strong> soma as categorias dela; um{" "}
             <strong>subtotal</strong> é a soma de todos os grupos da DRE acima dele (assim saem receita líquida, margem
             e resultado). Grupos <em>fora da DRE</em> só aparecem no fluxo de caixa. Cada lançamento do extrato cai na
-            linha da sua categoria, e no centro de custo padrão dela — a não ser que uma regra diga outro.
+            linha da sua categoria, e no centro de custo padrão dela — a não ser que uma regra diga outro. Os subtotais
+            marcados como <strong>indicador</strong> (margem de contribuição e resultado operacional) alimentam os custos
+            fixos e o ponto de equilíbrio da DRE.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -50,9 +52,10 @@ export default async function EstruturaDrePage() {
                     <Badge variant={subtotal ? "sky" : "secondary"}>{subtotal ? "= subtotal" : "grupo"}</Badge>
                     {linha.secao !== "dre" ? <Badge variant="warning">{SECAO_LABEL[linha.secao]}</Badge> : null}
                     {linha.basePercentual ? <Badge variant="success">base do %</Badge> : null}
+                    {linha.papel ? <Badge variant="success">indicador: {PAPEL_LABEL[linha.papel]}</Badge> : null}
                   </div>
                   <LinhaForm
-                    key={`${linha.id}-${linha.nome}-${linha.secao}-${linha.basePercentual}-${linha.mostrarPercentual}`}
+                    key={`${linha.id}-${linha.nome}-${linha.secao}-${linha.basePercentual}-${linha.mostrarPercentual}-${linha.papel ?? ""}`}
                     linha={linha}
                   />
                 </div>

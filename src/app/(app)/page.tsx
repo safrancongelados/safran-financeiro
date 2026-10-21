@@ -20,7 +20,7 @@ import {
   somasPorMesECategoria,
 } from "@/db/queries/financeiro";
 import { formatarCentavos, formatarPercentual } from "@/lib/dinheiro";
-import { montarDre } from "@/lib/dre";
+import { indicadores, montarDre } from "@/lib/dre";
 import { statusConexao } from "@/lib/extrato";
 import { deslocarMes, hojeISO, rotuloDia, rotuloMes, rotuloMesCurto, ultimosMeses } from "@/lib/periodo";
 import { maioresDespesas, numerosDoMes, serieDoGrafico, variacaoRelativa } from "@/lib/resumo";
@@ -101,6 +101,9 @@ export default async function InicioPage() {
   const anterior = numerosDoMes(dreAnterior, mesAnterior);
   const despesas = maioresDespesas(dre, mes);
   const pontos = serieDoGrafico(dre);
+  // Ponto de equilíbrio em receita bruta, pelas médias dos meses fechados.
+  const ind = indicadores(dre, meses.filter((m) => m < mes));
+  const equilibrio = ind.pontoDeEquilibrioBruto !== null && ind.pontoDeEquilibrioBruto > 0 ? ind.pontoDeEquilibrioBruto : null;
   const ultimaData = recentes[0]?.data ?? null;
   const comparacao = `vs ${rotuloMesCurto(mesAnterior).toLowerCase()} até dia ${dia}`;
 
@@ -203,15 +206,24 @@ export default async function InicioPage() {
               <CardTitle>Últimos 12 meses</CardTitle>
               <CardDescription>Receita bruta e resultado líquido, em reais, pelo regime de caixa.</CardDescription>
             </div>
-            <LegendaGrafico />
+            <LegendaGrafico comReferencia={equilibrio !== null} />
           </CardHeader>
           <CardContent className="pt-0">
-            <GraficoMeses pontos={pontos} mesParcial={mes} />
-            <p className="mt-2 text-right text-xs">
+            <GraficoMeses
+              pontos={pontos}
+              mesParcial={mes}
+              referencia={equilibrio !== null ? { valor: equilibrio, rotulo: "equilíbrio" } : undefined}
+            />
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+              <span>
+                {equilibrio !== null && ind.custosFixosMensais !== null && ind.margemSobreBase !== null
+                  ? `Ponto de equilíbrio: ${formatarCentavos(equilibrio)} de receita bruta por mês (custos fixos de ${formatarCentavos(ind.custosFixosMensais)}/mês, margem de ${formatarPercentual(ind.margemSobreBase, 1)}).`
+                  : null}
+              </span>
               <Link href="/dre?periodo=12m" className="font-medium text-primary underline-offset-2 hover:underline">
                 Ver a DRE mês a mês
               </Link>
-            </p>
+            </div>
           </CardContent>
         </Card>
 

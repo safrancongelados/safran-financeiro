@@ -32,12 +32,26 @@ contas próprias da Safran (GitHub, Vercel, Supabase, Pluggy).
    **conexão bancária**: a conta é conectada pelo widget da Pluggy
    (*Conectar banco*) e sincronizada todo dia às 07:00 (Maceió), a cada
    aviso do banco (webhook) ou pelo botão *Sincronizar agora*.
-5. **DRE** (`/dre`) — regime de caixa, mês a mês, na estrutura configurada
-   (a inicial: receita bruta − deduções = receita líquida − custos variáveis
-   = **margem de contribuição** − despesas fixas = resultado operacional ±
-   financeiro = **resultado líquido**). Período por ano civil ou últimos 12
-   meses, filtro por centro de custo, *Só totais* esconde as categorias e o
-   mês corrente fica em destaque. Cada valor leva às movimentações dele.
+5. **DRE** (`/dre`) — regime de caixa, mês a mês, na estrutura configurada.
+   A atual: receita bruta (por linha de produto: marmitas e porções, dietas
+   personalizadas, personal chef) − deduções (Simples, taxas de cartão/Pix)
+   = receita líquida − custos variáveis = **margem de contribuição** −
+   custos fixos de produção − despesas comerciais − despesas administrativas
+   = **resultado antes dos sócios** − remuneração dos sócios = resultado
+   operacional ± financeiro = **resultado líquido**. Os subtotais marcados
+   como *indicador* (margem e resultado operacional) dão os custos fixos e o
+   **ponto de equilíbrio** (fixos mensais ÷ margem %), que aparecem na DRE
+   e como linha de referência no gráfico do Início. Período por ano civil ou
+   últimos 12 meses, filtro por centro de custo, *Só totais* esconde as
+   categorias e o mês corrente fica em destaque. Cada valor leva às
+   movimentações dele.
+
+   Duas limitações do extrato: o Mercado Pago e a Tuna liberam as vendas em
+   cartão já líquidas da taxa, então a receita bruta fica um pouco abaixo da
+   real e "Taxas de meios de pagamento" só registra o que vem cobrado à
+   parte; e o extrato não sabe qual produto foi vendido — toda venda entra
+   como marmitas e porções, e dieta ou personal chef se marcam por cliente
+   no extrato (vale para todos os lançamentos daquele cliente).
 6. **Fluxo de caixa** (`/fluxo-de-caixa`) — saldo inicial, operação (o
    resultado da DRE), cada linha de fora da DRE e saldo final, no mesmo
    período da DRE. Os saldos são reconstruídos de trás para frente a partir

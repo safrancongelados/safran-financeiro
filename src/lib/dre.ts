@@ -7,7 +7,7 @@
  * valores já vêm com sinal (entrada positiva, saída negativa), então cada
  * subtotal é só soma — custo e despesa reduzem o resultado por conta própria.
  */
-import type { SecaoDre, TipoLinhaDre } from "@/db/schema";
+import type { PapelLinhaDre, SecaoDre, TipoLinhaDre } from "@/db/schema";
 
 export interface SomaMensal {
   mes: string; // YYYY-MM
@@ -24,6 +24,8 @@ export interface LinhaDreConfig {
   ordem: number;
   basePercentual: boolean;
   mostrarPercentual: boolean;
+  /** Subtotal que alimenta os indicadores (margem de contribuição ou resultado operacional). */
+  papel: PapelLinhaDre | null;
 }
 
 export interface CategoriaDre {
@@ -137,6 +139,78 @@ export function montarDre(
   const variacaoCaixa = somar(meses, ...grupos, semCategoria);
 
   return { meses, linhas, resultado, base, semCategoria, variacaoCaixa };
+}
+
+export interface Indicadores {
+  /** O subtotal marcado como margem de contribuição. */
+  margem: LinhaMontada | null;
+  /** O subtotal marcado como resultado operacional. */
+  operacional: LinhaMontada | null;
+  /** Tudo entre a margem e o resultado operacional, com sinal de custo (negativo). */
+  custosFixos: Serie | null;
+  /** Média mensal dos custos fixos nos meses considerados, positiva. */
+  custosFixosMensais: number | null;
+  /** Margem de contribuição sobre a linha base (receita líquida), 0–1. */
+  margemSobreBase: number | null;
+  /** Receita líquida mensal que cobre os custos fixos: fixos mensais ÷ margem %. */
+  pontoDeEquilibrio: number | null;
+  /** O mesmo ponto, em receita bruta (a primeira linha da DRE) — para comparar com as vendas. */
+  pontoDeEquilibrioBruto: number | null;
+  /** Receita líquida média por mês nos meses considerados. */
+  receitaLiquidaMensal: number | null;
+  /** Quantos meses entraram nas médias. */
+  meses: number;
+}
+
+/**
+ * Custos fixos e ponto de equilíbrio a partir dos subtotais marcados em
+ * Configurações. As médias mensais usam só `mesesFechados` (sem o mês em
+ * andamento, que ainda não tem todos os custos); vazio = todos os meses.
+ */
+export function indicadores(dre: Dre, mesesFechados: string[] = dre.meses): Indicadores {
+  const margem = dre.linhas.find((l) => l.linha.tipo === "subtotal" && l.linha.papel === "margem") ?? null;
+  const operacional = dre.linhas.find((l) => l.linha.tipo === "subtotal" && l.linha.papel === "operacional") ?? null;
+  const meses = mesesFechados.length > 0 ? mesesFechados : dre.meses;
+  const vazio: Indicadores = {
+    margem,
+    operacional,
+    custosFixos: null,
+    custosFixosMensais: null,
+    margemSobreBase: null,
+    pontoDeEquilibrio: null,
+    pontoDeEquilibrioBruto: null,
+    receitaLiquidaMensal: null,
+    meses: meses.length,
+  };
+  if (!margem || !operacional) return vazio;
+
+  const custosFixos: Serie = { porMes: {}, total: 0 };
+  for (const m of dre.meses) {
+    custosFixos.porMes[m] = (operacional.porMes[m] ?? 0) - (margem.porMes[m] ?? 0);
+    custosFixos.total += custosFixos.porMes[m];
+  }
+  const somaEm = (serie: Serie) => meses.reduce((acc, m) => acc + (serie.porMes[m] ?? 0), 0);
+  const fixosNoPeriodo = -somaEm(custosFixos);
+  const custosFixosMensais = fixosNoPeriodo / meses.length;
+
+  const base = dre.base;
+  const receitaBruta = dre.linhas.find((l) => l.linha.secao === "dre" && l.linha.tipo === "grupo") ?? null;
+  const baseNoPeriodo = base ? somaEm(base) : 0;
+  const margemNoPeriodo = somaEm(margem);
+  const margemSobreBase = baseNoPeriodo > 0 ? margemNoPeriodo / baseNoPeriodo : null;
+  const brutaNoPeriodo = receitaBruta ? somaEm(receitaBruta) : 0;
+  const margemSobreBruta = brutaNoPeriodo > 0 ? margemNoPeriodo / brutaNoPeriodo : null;
+
+  return {
+    ...vazio,
+    custosFixos,
+    custosFixosMensais,
+    margemSobreBase,
+    pontoDeEquilibrio: margemSobreBase && margemSobreBase > 0 ? Math.round(custosFixosMensais / margemSobreBase) : null,
+    pontoDeEquilibrioBruto:
+      margemSobreBruta && margemSobreBruta > 0 ? Math.round(custosFixosMensais / margemSobreBruta) : null,
+    receitaLiquidaMensal: base ? baseNoPeriodo / meses.length : null,
+  };
 }
 
 /**

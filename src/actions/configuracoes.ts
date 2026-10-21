@@ -1,10 +1,10 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { asc, eq, ne, sql } from "drizzle-orm";
+import { and, asc, eq, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
-import { categorias, centrosCusto, linhasDre, secaoDreEnum, tipoLinhaDreEnum } from "@/db/schema";
+import { categorias, centrosCusto, linhasDre, papelLinhaDreEnum, secaoDreEnum, tipoLinhaDreEnum } from "@/db/schema";
 import { obterSessao } from "@/lib/auth";
 import { aplicarRegras } from "@/lib/categorizacao";
 import { eViolacaoDeUnicidade } from "@/lib/db-erros";
@@ -59,8 +59,10 @@ const linhaSchema = z
     secao: z.enum(secaoDreEnum.enumValues),
     basePercentual: z.boolean(),
     mostrarPercentual: z.boolean(),
+    papel: z.enum(papelLinhaDreEnum.enumValues).nullable(),
   })
-  .refine((l) => l.tipo === "grupo" || l.secao === "dre", { message: "Subtotal só existe dentro da DRE." });
+  .refine((l) => l.tipo === "grupo" || l.secao === "dre", { message: "Subtotal só existe dentro da DRE." })
+  .refine((l) => l.tipo === "subtotal" || !l.papel, { message: "Só um subtotal pode ser margem ou resultado operacional." });
 
 /** Cria (id null) ou edita uma linha da DRE. O tipo (grupo ou subtotal) só se escolhe ao criar. */
 export async function salvarLinhaAction(id: string | null, _prev: ConfigFormState, formData: FormData): Promise<ConfigFormState> {
@@ -76,6 +78,7 @@ export async function salvarLinhaAction(id: string | null, _prev: ConfigFormStat
     secao: formData.get("secao"),
     basePercentual: formData.get("basePercentual") === "on",
     mostrarPercentual: formData.get("mostrarPercentual") === "on",
+    papel: (atual?.tipo ?? formData.get("tipo")) === "subtotal" ? vazioParaNulo(formData.get("papel")) : null,
   });
   if (!parsed.success) return { erro: parsed.error.issues[0]?.message ?? "Dados inválidos." };
   const dados = { ...parsed.data, mostrarPercentual: parsed.data.tipo === "subtotal" && parsed.data.mostrarPercentual };
@@ -88,6 +91,13 @@ export async function salvarLinhaAction(id: string | null, _prev: ConfigFormStat
           .update(linhasDre)
           .set({ basePercentual: false })
           .where(id ? ne(linhasDre.id, id) : sql`true`);
+      }
+      // E só uma é a margem, só uma o resultado operacional.
+      if (dados.papel) {
+        await tx
+          .update(linhasDre)
+          .set({ papel: null })
+          .where(and(eq(linhasDre.papel, dados.papel), id ? ne(linhasDre.id, id) : sql`true`));
       }
       if (id) {
         await tx.update(linhasDre).set(dados).where(eq(linhasDre.id, id));

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { BarChart3, Percent, Tags, TrendingUp } from "lucide-react";
+import { BarChart3, Percent, Scale, Target, TrendingUp } from "lucide-react";
 import {
   categoriasParaDre,
   contarSemCategoria,
@@ -10,7 +10,7 @@ import {
   somasPorMesECategoria,
 } from "@/db/queries/financeiro";
 import { formatarCentavos, formatarPercentual } from "@/lib/dinheiro";
-import { montarDre } from "@/lib/dre";
+import { indicadores, montarDre } from "@/lib/dre";
 import { linhasDaDre } from "@/lib/dre-tabela";
 import { UUID } from "@/lib/extrato-filtros";
 import { intervaloDoPeriodo, lerPeriodo, mesAtual, mesesDoPeriodo, paramsDoPeriodo, rotuloPeriodo, type Periodo } from "@/lib/periodo";
@@ -111,9 +111,14 @@ export default async function DrePage({ searchParams }: PageProps<"/dre">) {
   const dre = montarDre(mesesVisiveis, linhasConfig, categorias, somas);
 
   const receita = dre.linhas.find((l) => l.linha.secao === "dre" && l.linha.tipo === "grupo");
-  const margem = dre.linhas.find((l) => l.linha.tipo === "subtotal" && l.linha.mostrarPercentual);
+  // Médias mensais sem o mês em andamento, que ainda não tem todos os custos.
+  const ind = indicadores(dre, mesesVisiveis.filter((m) => m < hoje));
+  const margem = ind.margem ?? dre.linhas.find((l) => l.linha.tipo === "subtotal" && l.linha.mostrarPercentual);
   const nomeCentro = centro === "sem" ? "sem centro" : centros.find((c) => c.id === centro)?.nome;
-  const rotulo = rotuloPeriodo(periodo).toLowerCase();
+  // Filtrando por centro, a receita some e os percentuais e o equilíbrio perdem sentido.
+  const comProporcoes = !centro && Boolean(dre.base);
+  const cobreOsFixos =
+    ind.pontoDeEquilibrio !== null && ind.receitaLiquidaMensal !== null ? ind.receitaLiquidaMensal >= ind.pontoDeEquilibrio : null;
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8">
@@ -124,28 +129,48 @@ export default async function DrePage({ searchParams }: PageProps<"/dre">) {
 
       {filtros}
 
-      <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatTile icon={TrendingUp} label={`${receita?.linha.nome ?? "Receita"} · ${rotulo}`} value={formatarCentavos(receita?.total ?? 0)} />
+      {/* O período está nos chips acima; os rótulos ficam curtos para o número caber. */}
+      <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5">
+        <StatTile compacto icon={TrendingUp} label={receita?.linha.nome ?? "Receita bruta"} value={formatarCentavos(receita?.total ?? 0)} />
         <StatTile
+          compacto
           icon={Percent}
-          label={margem?.linha.nome ?? "Margem"}
-          value={!centro && margem && dre.base ? formatarPercentual(margem.total, dre.base.total) : "—"}
-          hint={margem ? formatarCentavos(margem.total) : undefined}
+          label={margem?.linha.nome ?? "Margem de contribuição"}
+          value={comProporcoes && margem ? formatarPercentual(margem.total, dre.base!.total) : "—"}
+          hint={margem ? formatarCentavos(margem.total) : "marque o subtotal em Configurações"}
         />
         <StatTile
+          compacto
+          icon={Scale}
+          label="Custos fixos"
+          value={ind.custosFixos ? formatarCentavos(-ind.custosFixos.total) : "—"}
+          hint={
+            ind.custosFixos
+              ? comProporcoes
+                ? `${formatarPercentual(-ind.custosFixos.total, dre.base!.total)} da ${dre.base!.linha.nome.toLowerCase()}`
+                : "entre a margem e o resultado operacional"
+              : "marque os subtotais em Configurações"
+          }
+        />
+        <StatTile
+          compacto
+          icon={Target}
+          label="Ponto de equilíbrio mensal"
+          value={comProporcoes && ind.pontoDeEquilibrio !== null ? formatarCentavos(ind.pontoDeEquilibrio) : "—"}
+          hint={
+            comProporcoes && ind.receitaLiquidaMensal !== null
+              ? `${dre.base!.linha.nome.toLowerCase()} média: ${formatarCentavos(ind.receitaLiquidaMensal)} (${ind.meses} ${ind.meses === 1 ? "mês" : "meses"})`
+              : "custos fixos mensais ÷ margem %"
+          }
+          tone={cobreOsFixos === null ? "default" : cobreOsFixos ? "success" : "warning"}
+        />
+        <StatTile
+          compacto
           icon={BarChart3}
-          label={`Resultado · ${rotulo}`}
+          label="Resultado líquido"
           value={formatarCentavos(dre.resultado.total)}
-          hint={!centro && dre.base ? `${formatarPercentual(dre.resultado.total, dre.base.total)} da ${dre.base.linha.nome.toLowerCase()}` : undefined}
+          hint={comProporcoes ? `${formatarPercentual(dre.resultado.total, dre.base!.total)} da ${dre.base!.linha.nome.toLowerCase()}` : undefined}
           tone={dre.resultado.total < 0 ? "destructive" : "success"}
-        />
-        <StatTile
-          icon={Tags}
-          label="Sem categoria"
-          value={String(semCategoria)}
-          hint={semCategoria > 0 ? "a DRE ainda não fecha" : "tudo categorizado"}
-          tone={semCategoria > 0 ? "warning" : "success"}
-          href={semCategoria > 0 ? "/extrato?categoria=sem" : undefined}
         />
       </div>
 
@@ -164,8 +189,9 @@ export default async function DrePage({ searchParams }: PageProps<"/dre">) {
         linhas={linhasDaDre(dre, { comPercentual: !centro, comCategorias: !soTotais })}
       />
       <p className="mt-3 text-xs text-muted-foreground">
-        A coluna do mês corrente está em destaque e ainda vai mudar até o fim do mês. Investimentos, empréstimos, sócios
-        e transferências ficam fora da DRE e aparecem no fluxo de caixa.
+        A coluna do mês corrente está em destaque e ainda vai mudar até o fim do mês; as médias dos indicadores não a
+        incluem. Ponto de equilíbrio = custos fixos mensais ÷ margem de contribuição %. Investimentos, empréstimos,
+        sócios e transferências ficam fora da DRE e aparecem no fluxo de caixa.
       </p>
     </div>
   );

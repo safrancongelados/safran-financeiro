@@ -2,8 +2,8 @@
 
 import { useActionState, useState } from "react";
 import { salvarLinhaAction, type ConfigFormState } from "@/actions/configuracoes";
-import type { SecaoDre, TipoLinhaDre } from "@/db/schema";
-import { SECAO_LABEL } from "@/lib/opcoes";
+import type { PapelLinhaDre, SecaoDre, TipoLinhaDre } from "@/db/schema";
+import { PAPEL_LABEL, SECAO_LABEL } from "@/lib/opcoes";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -21,6 +21,7 @@ export function LinhaForm({
     secao: SecaoDre;
     basePercentual: boolean;
     mostrarPercentual: boolean;
+    papel: PapelLinhaDre | null;
   };
 }) {
   const action = salvarLinhaAction.bind(null, linha?.id ?? null);
@@ -66,15 +67,31 @@ export function LinhaForm({
         base do %
       </label>
       {subtotal ? (
-        <label className="flex items-center gap-1.5 text-xs text-muted-foreground" title="Mostra, embaixo, quanto é da linha base">
-          <input
-            type="checkbox"
-            name="mostrarPercentual"
-            defaultChecked={linha?.mostrarPercentual}
-            className="size-4 accent-primary"
-          />
-          mostrar %
-        </label>
+        <>
+          <label className="flex items-center gap-1.5 text-xs text-muted-foreground" title="Mostra, embaixo, quanto é da linha base">
+            <input
+              type="checkbox"
+              name="mostrarPercentual"
+              defaultChecked={linha?.mostrarPercentual}
+              className="size-4 accent-primary"
+            />
+            mostrar %
+          </label>
+          <select
+            name="papel"
+            defaultValue={linha?.papel ?? ""}
+            aria-label="Indicador"
+            title="Custos fixos = margem − resultado operacional; ponto de equilíbrio = fixos ÷ margem %"
+            className={SELECT}
+          >
+            <option value="">Indicador: nenhum</option>
+            {(Object.keys(PAPEL_LABEL) as PapelLinhaDre[]).map((p) => (
+              <option key={p} value={p}>
+                Indicador: {PAPEL_LABEL[p]}
+              </option>
+            ))}
+          </select>
+        </>
       ) : null}
       <Button type="submit" size="sm" variant={linha ? "secondary" : "primary"} disabled={pendente}>
         {pendente ? "Salvando…" : linha ? "Salvar" : "Criar linha"}

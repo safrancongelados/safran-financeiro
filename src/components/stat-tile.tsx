@@ -16,6 +16,7 @@ export function StatTile({
   delta,
   tone = "default",
   href,
+  compacto = false,
 }: {
   icon: LucideIcon;
   label: string;
@@ -25,6 +26,8 @@ export function StatTile({
   tone?: "default" | "success" | "warning" | "destructive";
   /** Para onde o cartão leva, quando é um atalho (ex.: o que falta categorizar). */
   href?: string;
+  /** Para fileiras de cinco: ícone menor e valor um pouco menor, para o número caber inteiro. */
+  compacto?: boolean;
 }) {
   const toneClasses = {
     default: "bg-primary/10 text-primary",
@@ -37,18 +40,34 @@ export function StatTile({
   // No celular o cartão é estreito: o ícone sai e o valor diminui, para o número nunca ser cortado.
   const conteudo = (
     <>
-      <div className={cn("hidden size-9 shrink-0 items-center justify-center rounded-lg sm:flex", toneClasses[tone])}>
-        <Icon className="size-4.5" />
+      <div
+        className={cn(
+          "hidden shrink-0 items-center justify-center rounded-lg sm:flex",
+          compacto ? "size-7" : "size-9",
+          toneClasses[tone]
+        )}
+      >
+        <Icon className={compacto ? "size-3.5" : "size-4.5"} />
       </div>
       <div className="min-w-0">
         <p className="text-xs text-muted-foreground">{label}</p>
-        <p className="text-base font-semibold leading-tight text-foreground sm:truncate sm:text-lg">{value}</p>
+        <p
+          className={cn(
+            "font-semibold leading-tight text-foreground",
+            compacto ? "text-base" : "text-base sm:truncate sm:text-lg"
+          )}
+        >
+          {value}
+        </p>
         {delta ? <p className={cn("text-xs font-medium", deltaClasses[delta.tom])}>{delta.texto}</p> : null}
         {hint ? <p className="text-xs text-muted-foreground">{hint}</p> : null}
       </div>
     </>
   );
-  const classe = "flex min-w-0 items-center gap-3 overflow-hidden rounded-xl border border-border bg-card px-3.5 py-3 shadow-sm sm:px-4 sm:py-3.5";
+  const classe = cn(
+    "flex min-w-0 items-center overflow-hidden rounded-xl border border-border bg-card shadow-sm",
+    compacto ? "gap-2.5 px-3 py-3" : "gap-3 px-3.5 py-3 sm:px-4 sm:py-3.5"
+  );
 
   if (href) {
     return (

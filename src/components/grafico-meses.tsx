@@ -26,7 +26,22 @@ const MARGEM = { topo: 18, direita: 12, baixo: 26, esquerda: 52 };
  * em reais. O mês corrente, ainda em andamento, aparece mais claro. Passar o
  * mouse (ou o foco) por um mês mostra os dois valores.
  */
-export function GraficoMeses({ pontos, mesParcial }: { pontos: PontoDoGrafico[]; mesParcial?: string }) {
+export interface Referencia {
+  /** Em centavos, na mesma escala da receita. */
+  valor: number;
+  rotulo: string;
+}
+
+export function GraficoMeses({
+  pontos,
+  mesParcial,
+  referencia,
+}: {
+  pontos: PontoDoGrafico[];
+  mesParcial?: string;
+  /** Linha horizontal de referência (o ponto de equilíbrio, em receita bruta). */
+  referencia?: Referencia;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   const [largura, setLargura] = useState(640);
   const [ativo, setAtivo] = useState<number | null>(null);
@@ -40,7 +55,7 @@ export function GraficoMeses({ pontos, mesParcial }: { pontos: PontoDoGrafico[];
   }, []);
 
   const valores = pontos.flatMap((p) => [p.receita, p.resultado]);
-  const maximo = Math.max(1, ...valores);
+  const maximo = Math.max(1, ...valores, referencia?.valor ?? 0);
   const minimo = Math.min(0, ...valores);
   const passo = passoBonito(maximo - minimo);
   const topo = Math.ceil(maximo / passo) * passo;
@@ -92,6 +107,33 @@ export function GraficoMeses({ pontos, mesParcial }: { pontos: PontoDoGrafico[];
             </text>
           </g>
         ))}
+
+        {/* Referência: o ponto de equilíbrio */}
+        {referencia ? (
+          <g>
+            <line
+              x1={MARGEM.esquerda}
+              x2={largura - MARGEM.direita}
+              y1={y(referencia.valor)}
+              y2={y(referencia.valor)}
+              stroke="var(--color-warning)"
+              strokeWidth={1.5}
+            />
+            {/* Contorno na cor do fundo: o rótulo continua legível por cima de uma coluna. */}
+            <text
+              x={largura - MARGEM.direita}
+              y={y(referencia.valor) - 4}
+              textAnchor="end"
+              fill="var(--color-on-warning-soft)"
+              stroke="var(--color-card)"
+              strokeWidth={3}
+              paintOrder="stroke"
+              className="font-medium"
+            >
+              {referencia.rotulo} {compacto(referencia.valor)}
+            </text>
+          </g>
+        ) : null}
 
         {/* Colunas da receita */}
         {pontos.map((ponto, i) => {
@@ -212,7 +254,7 @@ export function GraficoMeses({ pontos, mesParcial }: { pontos: PontoDoGrafico[];
 }
 
 /** A legenda do gráfico, para o cabeçalho do cartão. */
-export function LegendaGrafico() {
+export function LegendaGrafico({ comReferencia }: { comReferencia?: boolean }) {
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
       <span className="flex items-center gap-1.5">
@@ -224,6 +266,11 @@ export function LegendaGrafico() {
       <span className="flex items-center gap-1.5">
         <span className="inline-block size-2.5 rounded-sm bg-primary/45" /> mês em andamento
       </span>
+      {comReferencia ? (
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block h-0.5 w-3 bg-warning" /> ponto de equilíbrio
+        </span>
+      ) : null}
     </div>
   );
 }

@@ -7,8 +7,9 @@ bancária única da empresa (Pluggy / Open Finance). Ver `README.md`.
 - Separado do sistema de gestão (repositório `safran`): não lê pedidos nem
   fichas técnicas. A única fonte é o extrato.
 - Valores sempre em centavos inteiros, com o sinal do caixa.
-- DRE em regime de caixa; o plano de contas (tabela `categorias`) define em
-  que linha cada movimentação cai (`grupo_dre`).
+- DRE em regime de caixa; a estrutura (tabela `linhas_dre`) e o plano de
+  contas (`categorias.linha_id`) são editáveis em Configurações, e as
+  mudanças de estrutura vão por migration de dados (ver `drizzle/0005`).
 - Contas próprias da Safran: GitHub `safrancongelados`, Vercel, Supabase
   (projeto "financas") e Pluggy. Nunca commitar credenciais.
 
