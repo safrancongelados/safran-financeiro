@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BarChart3, Landmark, LayoutDashboard, LogOut, Menu, Receipt, KeyRound, Settings, X } from "lucide-react";
+import { BarChart3, Landmark, LayoutDashboard, LogOut, Menu, Receipt, KeyRound, Settings, Users, X } from "lucide-react";
 import { logoutAction } from "@/actions/auth";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 const LINKS = [
   { href: "/", label: "Início", icon: LayoutDashboard, exato: true },
   { href: "/extrato", label: "Extrato", icon: Receipt },
+  { href: "/pessoas", label: "Pessoas", icon: Users },
   { href: "/dre", label: "DRE", icon: BarChart3 },
   { href: "/fluxo-de-caixa", label: "Fluxo de caixa", icon: Landmark },
   { href: "/configuracoes", label: "Configurações", icon: Settings },

@@ -105,13 +105,33 @@ export function resolverRegras<R extends RegraAplicavel>(mov: MovimentacaoParaRe
 export function regraAPartirDe(
   mov: MovimentacaoParaRegra
 ): { campo: CampoRegra; padrao: string; sentido: "entrada" | "saida" } | null {
+  return identidadesDe(mov)[0] ?? null;
+}
+
+export interface Identidade {
+  campo: CampoRegra;
+  padrao: string;
+  sentido: "entrada" | "saida";
+  /** Como a tela descreve o grupo: "mesmo CNPJ 12.345…", "mesma contraparte José". */
+  rotulo: string;
+}
+
+/**
+ * Todas as identidades possíveis de uma movimentação, da mais específica
+ * para a mais geral — é o que o diálogo "aplicar a todas ou só esta" oferece
+ * como escopo. A primeira é a que `regraAPartirDe` escolhe sozinha.
+ */
+export function identidadesDe(mov: MovimentacaoParaRegra): Identidade[] {
   const sentido = sentidoDe(mov.valorCentavos);
+  const lista: Identidade[] = [];
   if (documentoCompleto(mov.contraparteDocumento)) {
-    return { campo: "documento", padrao: mov.contraparteDocumento, sentido };
+    lista.push({ campo: "documento", padrao: mov.contraparteDocumento, sentido, rotulo: "mesmo CPF/CNPJ" });
   }
   const nome = mov.contraparte ? normalizarTexto(mov.contraparte) : "";
-  if (nome.length >= 3) return { campo: "contraparte", padrao: nome, sentido };
+  if (nome.length >= 3) lista.push({ campo: "contraparte", padrao: nome, sentido, rotulo: `mesma contraparte (${mov.contraparte?.trim()})` });
   const descricao = normalizarTexto(mov.descricao);
-  if (descricao.length >= 3 && descricao !== "(sem descricao)") return { campo: "descricao", padrao: descricao, sentido };
-  return null;
+  if (descricao.length >= 3 && descricao !== "(sem descricao)") {
+    lista.push({ campo: "descricao", padrao: descricao, sentido, rotulo: `mesma descrição (${mov.descricao.trim()})` });
+  }
+  return lista;
 }

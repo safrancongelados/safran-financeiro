@@ -40,8 +40,9 @@ export async function loginAction(_prev: FormState, formData: FormData): Promise
   if (!usuario || !(await verificarSenha(senha, usuario.senhaHash))) {
     return { erro: "Email ou senha incorretos." };
   }
+  if (!usuario.ativo) return { erro: "Este acesso foi desativado. Fale com o dono da conta." };
 
-  await criarSessao({ userId: usuario.id, nome: usuario.nome, email: usuario.email });
+  await criarSessao({ userId: usuario.id, nome: usuario.nome, email: usuario.email, papel: usuario.papel });
   redirect(destino);
 }
 

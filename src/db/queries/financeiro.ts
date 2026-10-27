@@ -7,14 +7,15 @@ import {
   contasBancarias,
   linhasDre,
   movimentacoesBancarias,
+  pessoas,
   regrasCategorizacao,
   vendasPorProduto,
 } from "@/db/schema";
 import type { CategoriaDre, LinhaDreConfig, MixVendas, SomaMensal } from "@/lib/dre";
 import type { FiltroExtrato } from "@/lib/extrato-filtros";
-import { DIRECAO_PADRAO } from "@/lib/extrato-filtros";
+import { DIRECAO_PADRAO, intervaloDoFiltro } from "@/lib/extrato-filtros";
 import { normalizarTexto, regraCasa, type RegraAplicavel } from "@/lib/regras";
-import { intervaloDoMes, mesmoDiaEm } from "@/lib/periodo";
+import { mesmoDiaEm } from "@/lib/periodo";
 
 export type ContaBancaria = typeof contasBancarias.$inferSelect;
 export type ConexaoBancaria = typeof conexoesBancarias.$inferSelect & { contas: ContaBancaria[] };
@@ -120,12 +121,20 @@ function condicaoBusca(q: string): SQL | undefined {
   return or(...partes);
 }
 
-function condicoesDoFiltro(filtro: FiltroExtrato): (SQL | undefined)[] {
-  const { inicio, fim } = intervaloDoMes(filtro.mes);
+function condicoesDoFiltro(filtro: FiltroExtrato, hoje: string): (SQL | undefined)[] {
+  const { inicio, fim } = intervaloDoFiltro(filtro, hoje);
   return [
     gte(movimentacoesBancarias.data, inicio),
     lt(movimentacoesBancarias.data, fim),
     filtro.conta ? eq(movimentacoesBancarias.contaId, filtro.conta) : undefined,
+    filtro.pessoa === "sem"
+      ? isNull(movimentacoesBancarias.pessoaId)
+      : filtro.pessoa
+        ? eq(movimentacoesBancarias.pessoaId, filtro.pessoa)
+        : undefined,
+    filtro.min !== undefined ? gte(sql`abs(${movimentacoesBancarias.valorCentavos})`, filtro.min) : undefined,
+    filtro.max !== undefined ? lte(sql`abs(${movimentacoesBancarias.valorCentavos})`, filtro.max) : undefined,
+    filtro.origem ? eq(movimentacoesBancarias.categorizadaPor, filtro.origem) : undefined,
     filtro.categoria === "sem"
       ? isNull(movimentacoesBancarias.categoriaId)
       : filtro.categoria
@@ -161,15 +170,14 @@ function ordenacao(filtro: FiltroExtrato): SQL[] {
   }
 }
 
-/** Movimentações do mês que passam pelo filtro, na ordem pedida (padrão: mais recentes primeiro). Sem o payload bruto, que é pesado. */
-export async function listarMovimentacoesDoMes(filtro: FiltroExtrato) {
+/** Movimentações do período que passam pelo filtro, na ordem pedida (padrão: mais recentes primeiro). Sem o payload bruto, que é pesado. */
+export async function listarMovimentacoes(filtro: FiltroExtrato, hoje: string) {
   return db
     .select({
       id: movimentacoesBancarias.id,
       data: movimentacoesBancarias.data,
       descricao: movimentacoesBancarias.descricao,
       valorCentavos: movimentacoesBancarias.valorCentavos,
-      meio: movimentacoesBancarias.meio,
       contraparte: movimentacoesBancarias.contraparte,
       contraparteDocumento: movimentacoesBancarias.contraparteDocumento,
       categoriaPluggy: movimentacoesBancarias.categoriaPluggy,
@@ -185,16 +193,21 @@ export async function listarMovimentacoesDoMes(filtro: FiltroExtrato) {
       centroCustoId: movimentacoesBancarias.centroCustoId,
       contaNome: contasBancarias.nome,
       contaTipo: contasBancarias.tipo,
+      pessoaId: movimentacoesBancarias.pessoaId,
+      pessoaNome: pessoas.nome,
+      observacao: movimentacoesBancarias.observacao,
+      meio: movimentacoesBancarias.meio,
     })
     .from(movimentacoesBancarias)
     .innerJoin(contasBancarias, eq(movimentacoesBancarias.contaId, contasBancarias.id))
     .leftJoin(categorias, eq(movimentacoesBancarias.categoriaId, categorias.id))
     .leftJoin(linhasDre, eq(categorias.linhaId, linhasDre.id))
-    .where(and(...condicoesDoFiltro(filtro)))
+    .leftJoin(pessoas, eq(movimentacoesBancarias.pessoaId, pessoas.id))
+    .where(and(...condicoesDoFiltro(filtro, hoje)))
     .orderBy(...ordenacao(filtro));
 }
 
-export type MovimentacaoLinha = Awaited<ReturnType<typeof listarMovimentacoesDoMes>>[number];
+export type MovimentacaoLinha = Awaited<ReturnType<typeof listarMovimentacoes>>[number];
 
 export interface TotaisDoMes {
   /** Entradas e saídas do caixa: só contas (não cartão) e sem transferência entre contas próprias. */
@@ -204,9 +217,8 @@ export interface TotaisDoMes {
   semCategoria: number;
 }
 
-/** Os números do mês inteiro, independentes do filtro da tela. */
-export async function totaisDoMes(mes: string): Promise<TotaisDoMes> {
-  const { inicio, fim } = intervaloDoMes(mes);
+/** Os números do período inteiro, independentes dos outros filtros da tela. */
+export async function totaisDoIntervalo(inicio: string, fim: string): Promise<TotaisDoMes> {
   const doCaixa = sql`${contasBancarias.tipo} = 'BANK' and coalesce(${linhasDre.secao}, 'dre') <> 'transferencia'`;
   const [r] = await db
     .select({

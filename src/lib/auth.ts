@@ -1,6 +1,7 @@
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
 import bcrypt from "bcryptjs";
+import type { PapelUsuario } from "@/db/schema";
 
 export const COOKIE_NAME = "safran_fin_session";
 const DURACAO = 60 * 60 * 24 * 30; // 30 dias
@@ -16,6 +17,14 @@ export interface SessionPayload {
   userId: string;
   nome: string;
   email: string;
+  papel: PapelUsuario;
+}
+
+const PAPEIS: PapelUsuario[] = ["dono", "financeiro", "leitura"];
+
+/** Sessão criada antes de existir papel vale como dono: era o único acesso. */
+function lerPapel(valor: unknown): PapelUsuario {
+  return PAPEIS.includes(valor as PapelUsuario) ? (valor as PapelUsuario) : "dono";
 }
 
 export async function hashPassword(senha: string): Promise<string> {
@@ -55,7 +64,12 @@ export async function obterSessao(): Promise<SessionPayload | null> {
   if (!token) return null;
   try {
     const { payload } = await jwtVerify(token, getSecret(), { audience: AUDIENCIA });
-    return { userId: payload.userId as string, nome: payload.nome as string, email: payload.email as string };
+    return {
+      userId: payload.userId as string,
+      nome: payload.nome as string,
+      email: payload.email as string,
+      papel: lerPapel(payload.papel),
+    };
   } catch {
     return null;
   }

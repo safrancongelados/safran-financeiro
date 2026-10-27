@@ -57,6 +57,13 @@
       "when": 1793093504136,
       "tag": "0007_estornos",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1793094491057,
+      "tag": "0008_estrutura_saas",
+      "breakpoints": true
     }
   ]
 }

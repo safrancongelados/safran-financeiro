@@ -1,13 +1,14 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, inArray, ne } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
-import { campoRegraEnum, movimentacoesBancarias, regrasCategorizacao, sentidoRegraEnum } from "@/db/schema";
-import { obterSessao } from "@/lib/auth";
+import { campoRegraEnum, categorias, movimentacoesBancarias, regrasCategorizacao, sentidoRegraEnum } from "@/db/schema";
+import { registrar } from "@/lib/auditoria";
 import { aplicarRegras } from "@/lib/categorizacao";
-import { normalizarTexto, regraAPartirDe, regraCasa } from "@/lib/regras";
+import { exigirEdicao } from "@/lib/permissoes";
+import { identidadesDe, normalizarTexto, regraCasa, type Identidade } from "@/lib/regras";
 
 const uuid = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
 const uuidOuNulo = uuid.nullable();
@@ -25,12 +26,58 @@ async function buscarMovimentacao(id: string) {
       contraparte: movimentacoesBancarias.contraparte,
       contraparteDocumento: movimentacoesBancarias.contraparteDocumento,
       descricao: movimentacoesBancarias.descricao,
+      categoriaId: movimentacoesBancarias.categoriaId,
       categorizadaPor: movimentacoesBancarias.categorizadaPor,
     })
     .from(movimentacoesBancarias)
     .where(eq(movimentacoesBancarias.id, id))
     .limit(1);
   return mov;
+}
+
+/** Quantas outras linhas casam com cada identidade — o número do diálogo de escopo. */
+async function contarIguais(movId: string, identidades: Identidade[]): Promise<number[]> {
+  if (identidades.length === 0) return [];
+  const outras = await db
+    .select({
+      valorCentavos: movimentacoesBancarias.valorCentavos,
+      contraparte: movimentacoesBancarias.contraparte,
+      contraparteDocumento: movimentacoesBancarias.contraparteDocumento,
+      descricao: movimentacoesBancarias.descricao,
+    })
+    .from(movimentacoesBancarias)
+    .where(ne(movimentacoesBancarias.id, movId));
+  return identidades.map(
+    (ident) => outras.filter((o) => regraCasa({ id: "", categoriaId: null, nomeExibicao: null, centroCustoId: null, ...ident }, o)).length
+  );
+}
+
+export type Escopo = "documento" | "contraparte" | "descricao" | "so_esta";
+
+export interface OpcaoEscopo {
+  escopo: Escopo;
+  rotulo: string;
+  /** Outras linhas, além desta, que a escolha alcança. */
+  iguais: number;
+}
+
+/**
+ * Antes de mudar a categoria, o que a mudança pode alcançar: as linhas com
+ * o mesmo CPF/CNPJ, com a mesma contraparte, com a mesma descrição, ou só
+ * esta. A tela mostra as opções com a contagem e a pessoa escolhe.
+ */
+export async function preverEscoposAction(movimentacaoId: string): Promise<{ erro?: string; opcoes?: OpcaoEscopo[] }> {
+  if (!uuid.safeParse(movimentacaoId).success) return { erro: "Dados inválidos." };
+  const mov = await buscarMovimentacao(movimentacaoId);
+  if (!mov) return { erro: "Movimentação não encontrada." };
+  const identidades = identidadesDe(mov);
+  const contagens = await contarIguais(mov.id, identidades);
+  return {
+    opcoes: [
+      ...identidades.map((ident, i) => ({ escopo: ident.campo as Escopo, rotulo: ident.rotulo, iguais: contagens[i] })),
+      { escopo: "so_esta", rotulo: "só esta linha", iguais: 0 },
+    ],
+  };
 }
 
 /** Vazio vira nulo: sem nome, o extrato mostra a descrição do banco. */
@@ -59,27 +106,44 @@ const edicaoSchema = z.discriminatedUnion("campo", [
 ]);
 export type EdicaoLinha = z.input<typeof edicaoSchema>;
 
+const escopoSchema = z.enum(["documento", "contraparte", "descricao", "so_esta"]).optional();
+
+async function nomeDaCategoria(id: string | null): Promise<string | null> {
+  if (!id) return null;
+  const [c] = await db.select({ nome: categorias.nome }).from(categorias).where(eq(categorias.id, id)).limit(1);
+  return c?.nome ?? null;
+}
+
 /**
- * Edição de uma linha do extrato — nome, categoria ou centro de custo — que
- * vale para todas as iguais (mesmo CPF/CNPJ, senão mesma contraparte, senão
- * mesma descrição, no mesmo sentido), passadas e futuras. Grava na regra de
- * identidade da linha, mexendo só no campo editado.
+ * Edição de uma linha do extrato — nome, categoria ou centro de custo.
+ *
+ * Sem `escopo` (ou com o escopo de uma identidade), vale para todas as
+ * iguais — mesmo CPF/CNPJ, senão mesma contraparte, senão mesma descrição,
+ * no mesmo sentido —, passadas e futuras: grava na regra daquela identidade,
+ * mexendo só no campo editado. Com `escopo: "so_esta"`, a categoria vale só
+ * para esta linha, como escolha manual que regra nenhuma muda.
  *
  * Categoria nula tira a categoria da regra de identidade (volta a valer a
  * regra mais geral, se houver); centro nulo volta ao padrão da categoria;
  * nome vazio ou igual à descrição volta a mostrar a descrição do banco.
  */
-export async function editarLinhaAction(movimentacaoId: string, edicao: EdicaoLinha): Promise<ResultadoEdicao> {
-  if (!(await obterSessao())) return { erro: "Sessão expirada." };
+export async function editarLinhaAction(movimentacaoId: string, edicao: EdicaoLinha, escopo?: Escopo): Promise<ResultadoEdicao> {
+  const acesso = await exigirEdicao();
+  if ("erro" in acesso) return { erro: acesso.erro };
   const parsed = edicaoSchema.safeParse(edicao);
-  if (!uuid.safeParse(movimentacaoId).success || !parsed.success) return { erro: "Dados inválidos." };
+  const esc = escopoSchema.safeParse(escopo);
+  if (!uuid.safeParse(movimentacaoId).success || !parsed.success || !esc.success) return { erro: "Dados inválidos." };
 
   const mov = await buscarMovimentacao(movimentacaoId);
   if (!mov) return { erro: "Movimentação não encontrada." };
 
-  const identidade = regraAPartirDe(mov);
-  if (!identidade) {
-    // Sem documento, contraparte nem descrição: não há como achar as iguais.
+  const identidades = identidadesDe(mov);
+  const identidade = esc.data && esc.data !== "so_esta" ? identidades.find((i) => i.campo === esc.data) : identidades[0];
+  const soEsta = esc.data === "so_esta" || !identidade;
+
+  if (soEsta) {
+    // Sem documento, contraparte nem descrição não há como achar as iguais; e
+    // "só esta" é escolha manual por definição.
     if (parsed.data.campo !== "categoria") {
       return { erro: "Esta linha não tem documento, contraparte nem descrição para reconhecer as iguais." };
     }
@@ -87,6 +151,12 @@ export async function editarLinhaAction(movimentacaoId: string, edicao: EdicaoLi
       .update(movimentacoesBancarias)
       .set({ categoriaId: parsed.data.valor, categorizadaPor: parsed.data.valor ? "manual" : null, updatedAt: new Date() })
       .where(eq(movimentacoesBancarias.id, mov.id));
+    await registrar(acesso.sessao, {
+      acao: "so_nesta",
+      alvoTipo: "movimentacao",
+      alvoId: mov.id,
+      detalhe: { de: await nomeDaCategoria(mov.categoriaId), para: await nomeDaCategoria(parsed.data.valor), descricao: mov.descricao },
+    });
     await aplicarRegras();
     revalidarTudo();
     return { iguais: 0 };
@@ -104,21 +174,16 @@ export async function editarLinhaAction(movimentacaoId: string, edicao: EdicaoLi
     mudanca = { centroCustoId: parsed.data.valor };
   }
 
+  const chave = { campo: identidade.campo, padrao: identidade.padrao, sentido: identidade.sentido };
   const [antes] = await db
     .select({ id: regrasCategorizacao.id, categoriaId: regrasCategorizacao.categoriaId })
     .from(regrasCategorizacao)
-    .where(
-      and(
-        eq(regrasCategorizacao.campo, identidade.campo),
-        eq(regrasCategorizacao.padrao, identidade.padrao),
-        eq(regrasCategorizacao.sentido, identidade.sentido)
-      )
-    )
+    .where(and(eq(regrasCategorizacao.campo, chave.campo), eq(regrasCategorizacao.padrao, chave.padrao), eq(regrasCategorizacao.sentido, chave.sentido)))
     .limit(1);
 
   const [regra] = await db
     .insert(regrasCategorizacao)
-    .values({ ...identidade, ...mudanca })
+    .values({ ...chave, ...mudanca })
     .onConflictDoUpdate({
       target: [regrasCategorizacao.campo, regrasCategorizacao.padrao, regrasCategorizacao.sentido],
       set: mudanca,
@@ -141,17 +206,20 @@ export async function editarLinhaAction(movimentacaoId: string, edicao: EdicaoLi
   await aplicarRegras();
   revalidarTudo();
 
-  const outras = await db
-    .select({
-      valorCentavos: movimentacoesBancarias.valorCentavos,
-      contraparte: movimentacoesBancarias.contraparte,
-      contraparteDocumento: movimentacoesBancarias.contraparteDocumento,
-      descricao: movimentacoesBancarias.descricao,
-    })
-    .from(movimentacoesBancarias)
-    .where(ne(movimentacoesBancarias.id, mov.id));
-  const regraIdentidade = { id: regra.id, categoriaId: null, nomeExibicao: null, centroCustoId: null, ...identidade };
-  const iguais = outras.filter((o) => regraCasa(regraIdentidade, o)).length;
+  const [iguais] = await contarIguais(mov.id, [identidade]);
+  await registrar(acesso.sessao, {
+    acao: parsed.data.campo,
+    alvoTipo: "movimentacao",
+    alvoId: mov.id,
+    detalhe: {
+      descricao: mov.descricao,
+      escopo: identidade.rotulo,
+      iguais,
+      ...(parsed.data.campo === "categoria"
+        ? { de: await nomeDaCategoria(mov.categoriaId), para: await nomeDaCategoria(parsed.data.valor) }
+        : { para: parsed.data.valor }),
+    },
+  });
 
   return {
     iguais,
@@ -165,16 +233,17 @@ const desfazerSchema = z.discriminatedUnion("nova", [
 ]);
 
 /**
- * "Só nesta": a categoria escolhida vale só para esta linha. Devolve a
- * categoria da regra de identidade ao que era antes e marca a linha como
- * escolha manual, que regra nenhuma muda.
+ * "Só nesta" depois do fato: a categoria escolhida vale só para esta linha.
+ * Devolve a categoria da regra de identidade ao que era antes e marca a
+ * linha como escolha manual, que regra nenhuma muda.
  */
 export async function soNestaAction(
   movimentacaoId: string,
   categoriaId: string | null,
   desfazer: EstadoAnterior
 ): Promise<{ erro?: string }> {
-  if (!(await obterSessao())) return { erro: "Sessão expirada." };
+  const acesso = await exigirEdicao();
+  if ("erro" in acesso) return { erro: acesso.erro };
   const d = desfazerSchema.safeParse(desfazer);
   if (!uuid.safeParse(movimentacaoId).success || !uuidOuNulo.safeParse(categoriaId).success || !d.success) {
     return { erro: "Dados inválidos." };
@@ -195,16 +264,63 @@ export async function soNestaAction(
     .set({ categoriaId, categorizadaPor: categoriaId ? "manual" : null, updatedAt: new Date() })
     .where(eq(movimentacoesBancarias.id, movimentacaoId));
 
+  await registrar(acesso.sessao, { acao: "so_nesta", alvoTipo: "movimentacao", alvoId: movimentacaoId, detalhe: { para: await nomeDaCategoria(categoriaId) } });
   await aplicarRegras();
   revalidarTudo();
   return {};
 }
 
+/**
+ * Categoria para várias linhas de uma vez, como escolha manual de cada uma
+ * (regra nenhuma muda). É o caminho da seleção em lote: a pessoa já olhou
+ * linha por linha e decidiu.
+ */
+export async function categorizarEmLoteAction(
+  movimentacaoIds: string[],
+  categoriaId: string | null
+): Promise<{ erro?: string; alteradas?: number }> {
+  const acesso = await exigirEdicao();
+  if ("erro" in acesso) return { erro: acesso.erro };
+  const ids = movimentacaoIds.filter((id) => uuid.safeParse(id).success).slice(0, 500);
+  if (ids.length === 0 || !uuidOuNulo.safeParse(categoriaId).success) return { erro: "Dados inválidos." };
+
+  const alteradas = await db
+    .update(movimentacoesBancarias)
+    .set({ categoriaId, categorizadaPor: categoriaId ? "manual" : null, updatedAt: new Date() })
+    .where(inArray(movimentacoesBancarias.id, ids))
+    .returning({ id: movimentacoesBancarias.id });
+  await registrar(acesso.sessao, {
+    acao: "lote",
+    alvoTipo: "movimentacao",
+    detalhe: { lancamentos: alteradas.length, para: await nomeDaCategoria(categoriaId) },
+  });
+  await aplicarRegras();
+  revalidarTudo();
+  return { alteradas: alteradas.length };
+}
+
+/** Anotação livre numa linha ("adiantamento de férias"). Vazio apaga. */
+export async function editarObservacaoAction(movimentacaoId: string, texto: string): Promise<{ erro?: string }> {
+  const acesso = await exigirEdicao();
+  if ("erro" in acesso) return { erro: acesso.erro };
+  if (!uuid.safeParse(movimentacaoId).success) return { erro: "Dados inválidos." };
+  const obs = texto.trim().slice(0, 200) || null;
+  await db
+    .update(movimentacoesBancarias)
+    .set({ observacao: obs, updatedAt: new Date() })
+    .where(eq(movimentacoesBancarias.id, movimentacaoId));
+  await registrar(acesso.sessao, { acao: "observacao", alvoTipo: "movimentacao", alvoId: movimentacaoId, detalhe: { para: obs } });
+  revalidatePath("/extrato");
+  return {};
+}
+
 export async function excluirRegraAction(formData: FormData) {
-  if (!(await obterSessao())) return;
+  const acesso = await exigirEdicao();
+  if ("erro" in acesso) return;
   const id = String(formData.get("id") ?? "");
   if (!uuid.safeParse(id).success) return;
-  await db.delete(regrasCategorizacao).where(eq(regrasCategorizacao.id, id));
+  const [r] = await db.delete(regrasCategorizacao).where(eq(regrasCategorizacao.id, id)).returning({ padrao: regrasCategorizacao.padrao });
+  if (r) await registrar(acesso.sessao, { acao: "apagar", alvoTipo: "regra", alvoId: id, detalhe: { padrao: r.padrao } });
   // O que a regra decidia volta para o que as outras regras disserem.
   await aplicarRegras();
   revalidarTudo();
@@ -236,7 +352,8 @@ const regraSchema = z.object({
  * contraparte diferente.
  */
 export async function criarRegraManualAction(_prev: RegraFormState, formData: FormData): Promise<RegraFormState> {
-  if (!(await obterSessao())) return { erro: "Sessão expirada." };
+  const acesso = await exigirEdicao();
+  if ("erro" in acesso) return { erro: acesso.erro };
 
   const base = regraSchema.safeParse({
     campo: formData.get("campo"),
@@ -258,14 +375,16 @@ export async function criarRegraManualAction(_prev: RegraFormState, formData: Fo
     return { erro: "Informe um CPF (11 dígitos) ou CNPJ (14 dígitos) completo." };
   }
 
-  await db
+  const [regra] = await db
     .insert(regrasCategorizacao)
     .values({ campo, padrao, sentido, ...attrs.data })
     .onConflictDoUpdate({
       target: [regrasCategorizacao.campo, regrasCategorizacao.padrao, regrasCategorizacao.sentido],
       set: attrs.data,
-    });
+    })
+    .returning({ id: regrasCategorizacao.id });
 
+  await registrar(acesso.sessao, { acao: "criar", alvoTipo: "regra", alvoId: regra.id, detalhe: { campo, padrao, sentido, para: await nomeDaCategoria(attrs.data.categoriaId) } });
   const alteradas = await aplicarRegras();
   revalidarTudo();
   return { ok: `Regra criada. ${alteradas} movimentação(ões) mudaram de categoria.` };
@@ -279,7 +398,8 @@ export async function atualizarRegraAction(
   id: string,
   dados: { categoriaId: string | null; nomeExibicao: string; centroCustoId: string | null }
 ): Promise<{ erro?: string; alteradas?: number }> {
-  if (!(await obterSessao())) return { erro: "Sessão expirada." };
+  const acesso = await exigirEdicao();
+  if ("erro" in acesso) return { erro: acesso.erro };
   if (!uuid.safeParse(id).success) return { erro: "Regra inválida." };
   const attrs = atributosRegra.safeParse(dados);
   if (!attrs.success) return { erro: attrs.error.issues[0]?.message ?? "Dados inválidos." };
@@ -288,9 +408,10 @@ export async function atualizarRegraAction(
     .update(regrasCategorizacao)
     .set(attrs.data)
     .where(eq(regrasCategorizacao.id, id))
-    .returning({ id: regrasCategorizacao.id });
+    .returning({ id: regrasCategorizacao.id, padrao: regrasCategorizacao.padrao });
   if (atualizadas.length === 0) return { erro: "Regra não encontrada." };
 
+  await registrar(acesso.sessao, { acao: "editar", alvoTipo: "regra", alvoId: id, detalhe: { padrao: atualizadas[0].padrao, para: await nomeDaCategoria(attrs.data.categoriaId) } });
   const alteradas = await aplicarRegras();
   revalidarTudo();
   return { alteradas };
@@ -298,7 +419,8 @@ export async function atualizarRegraAction(
 
 /** Roda as regras sobre todo o extrato sem esperar o sync. */
 export async function aplicarRegrasAction(): Promise<{ erro?: string; alteradas?: number }> {
-  if (!(await obterSessao())) return { erro: "Sessão expirada." };
+  const acesso = await exigirEdicao();
+  if ("erro" in acesso) return { erro: acesso.erro };
   const alteradas = await aplicarRegras();
   revalidarTudo();
   return { alteradas };

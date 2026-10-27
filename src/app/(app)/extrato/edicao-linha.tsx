@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
-import { Pencil } from "lucide-react";
+import { Loader2, MessageSquareText, Pencil } from "lucide-react";
 import { toast } from "sonner";
-import { editarLinhaAction, soNestaAction } from "@/actions/categorias";
+import { editarLinhaAction, editarObservacaoAction, preverEscoposAction, type Escopo, type OpcaoEscopo } from "@/actions/categorias";
 import type { GrupoOpcoes, OpcaoCentro } from "@/lib/opcoes";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 const SELECT =
@@ -94,9 +95,38 @@ export function NomeEditavel({
   );
 }
 
+export type OrigemCategoria = "regra" | "manual" | "pessoa" | "estorno" | null;
+
+const SELO: Record<Exclude<OrigemCategoria, null>, { texto: string; titulo: string }> = {
+  regra: { texto: "auto", titulo: "Categorizada por regra — ver a regra" },
+  manual: { texto: "só esta", titulo: "Exceção: escolhida só para esta linha" },
+  pessoa: { texto: "pessoa", titulo: "Veio da categoria padrão da pessoa cadastrada" },
+  estorno: { texto: "estorno", titulo: "Estorno: herdou a categoria do lançamento que devolveu, para os dois se anularem na DRE" },
+};
+
+/** O selo que diz de onde veio a categoria. */
+export function SeloOrigem({ origem, regraId }: { origem: OrigemCategoria; regraId: string | null }) {
+  if (!origem) return null;
+  const s = SELO[origem];
+  const classe = "text-[10px] font-semibold uppercase text-muted-foreground";
+  if (origem === "regra" && regraId) {
+    return (
+      <Link href={`/configuracoes/regras#regra-${regraId}`} title={s.titulo} className={cn(classe, "underline-offset-2 hover:underline")}>
+        {s.texto}
+      </Link>
+    );
+  }
+  return (
+    <span title={s.titulo} className={classe}>
+      {s.texto}
+    </span>
+  );
+}
+
 /**
- * Categoria da linha. Trocar vale para todas as iguais; o aviso oferece
- * "Só nesta" para a exceção (fica como escolha manual, que regra não muda).
+ * Categoria da linha. Ao escolher outra, antes de gravar pergunta o
+ * alcance: todas as linhas com o mesmo CPF/CNPJ, com a mesma contraparte,
+ * com a mesma descrição (com a contagem de cada uma) ou só esta.
  */
 export function CategoriaSelect({
   movimentacaoId,
@@ -110,51 +140,81 @@ export function CategoriaSelect({
   movimentacaoId: string;
   categoriaId: string | null;
   categoriaNome: string | null;
-  origem: "regra" | "manual" | null;
+  origem: OrigemCategoria;
   /** Regra que deu a categoria; o selo "auto" leva até ela. */
   regraId: string | null;
   opcoes: GrupoOpcoes[];
-  /** Na visão por nome a linha representa o grupo inteiro: a exceção não faz sentido ali. */
+  /** Na visão por nome a linha representa o grupo inteiro: "só esta" não faz sentido ali. */
   permitirSoNesta?: boolean;
 }) {
   const [valor, setValor] = useState(categoriaId ?? "");
   const [pendente, startTransition] = useTransition();
+  const [dialogo, setDialogo] = useState<{ novo: string; opcoes: OpcaoEscopo[]; escopo: Escopo } | null>(null);
+  const [carregando, setCarregando] = useState(false);
+  const caixa = useRef<HTMLDivElement>(null);
   const conhecida = !categoriaId || opcoes.some((g) => g.itens.some((i) => i.id === categoriaId));
+  const nomeDe = (id: string) => opcoes.flatMap((g) => g.itens).find((i) => i.id === id)?.nome ?? "Sem categoria";
 
-  function mudar(novo: string) {
+  // Clique fora fecha o diálogo sem gravar.
+  useEffect(() => {
+    if (!dialogo) return;
+    function fora(e: MouseEvent) {
+      if (caixa.current && !caixa.current.contains(e.target as Node)) setDialogo(null);
+    }
+    function esc(e: KeyboardEvent) {
+      if (e.key === "Escape") setDialogo(null);
+    }
+    document.addEventListener("mousedown", fora);
+    document.addEventListener("keydown", esc);
+    return () => {
+      document.removeEventListener("mousedown", fora);
+      document.removeEventListener("keydown", esc);
+    };
+  }, [dialogo]);
+
+  async function escolher(novo: string) {
+    if (novo === (categoriaId ?? "")) return;
+    setCarregando(true);
+    const r = await preverEscoposAction(movimentacaoId);
+    setCarregando(false);
+    if (r.erro || !r.opcoes) {
+      toast.error(r.erro ?? "Não foi possível preparar a mudança.");
+      return;
+    }
+    const opcoesEscopo = permitirSoNesta ? r.opcoes : r.opcoes.filter((o) => o.escopo !== "so_esta");
+    // Sem nenhuma identidade, só resta "só esta": grava direto.
+    if (opcoesEscopo.length === 1 && opcoesEscopo[0].escopo === "so_esta") {
+      aplicar(novo, "so_esta");
+      return;
+    }
+    setDialogo({ novo, opcoes: opcoesEscopo, escopo: opcoesEscopo[0].escopo });
+  }
+
+  function aplicar(novo: string, escopo: Escopo) {
     const anterior = valor;
+    setDialogo(null);
     setValor(novo);
     startTransition(async () => {
-      const r = await editarLinhaAction(movimentacaoId, { campo: "categoria", valor: novo || null });
+      const r = await editarLinhaAction(movimentacaoId, { campo: "categoria", valor: novo || null }, escopo);
       if (r.erro) {
         setValor(anterior);
         toast.error(r.erro);
         return;
       }
-      const desfazer = r.desfazer;
-      toast.success(aviso("Categoria salva", r.iguais), {
-        duration: 10000,
-        action:
-          permitirSoNesta && r.iguais && desfazer
-            ? {
-                label: "Só nesta",
-                onClick: async () => {
-                  const s = await soNestaAction(movimentacaoId, novo || null, desfazer);
-                  if (s.erro) toast.error(s.erro);
-                  else toast.success("Categoria mudada só nesta linha; as iguais voltaram ao que eram.");
-                },
-              }
-            : undefined,
-      });
+      toast.success(
+        escopo === "so_esta"
+          ? `Categoria "${nomeDe(novo)}" salva só nesta linha.`
+          : aviso(`Categoria "${nomeDe(novo)}" salva`, r.iguais)
+      );
     });
   }
 
   return (
-    <div className="flex items-center gap-1.5">
+    <div ref={caixa} className="relative flex items-center gap-1.5">
       <select
-        value={valor}
-        disabled={pendente}
-        onChange={(e) => mudar(e.target.value)}
+        value={dialogo ? dialogo.novo : valor}
+        disabled={pendente || carregando}
+        onChange={(e) => escolher(e.target.value)}
         aria-label="Categoria"
         className={cn(SELECT, !valor && "border-warning/60 text-on-warning-soft")}
       >
@@ -170,27 +230,52 @@ export function CategoriaSelect({
           </optgroup>
         ))}
       </select>
-      {valor === (categoriaId ?? "") && origem === "regra" && regraId ? (
-        <Link
-          href={`/configuracoes/regras#regra-${regraId}`}
-          title="Categorizada por regra — ver a regra"
-          className="text-[10px] font-semibold uppercase text-muted-foreground underline-offset-2 hover:underline"
+      {carregando || pendente ? <Loader2 className="size-3.5 animate-spin text-muted-foreground" /> : null}
+      {!dialogo && !pendente && valor === (categoriaId ?? "") ? <SeloOrigem origem={origem} regraId={regraId} /> : null}
+
+      {dialogo ? (
+        <div
+          role="dialog"
+          aria-label="Onde aplicar a categoria"
+          className="absolute top-full left-0 z-40 mt-1 w-80 rounded-lg border border-border bg-card p-3 text-left shadow-elevation-2"
         >
-          auto
-        </Link>
-      ) : null}
-      {valor === (categoriaId ?? "") && categoriaId && origem === "regra" && !regraId ? (
-        <span
-          title="Estorno: herdou a categoria do lançamento que devolveu, para os dois se anularem na DRE"
-          className="text-[10px] font-semibold uppercase text-muted-foreground"
-        >
-          estorno
-        </span>
-      ) : null}
-      {valor === (categoriaId ?? "") && origem === "manual" ? (
-        <span title="Exceção: escolhida só para esta linha" className="text-[10px] font-semibold uppercase text-muted-foreground">
-          só esta
-        </span>
+          <p className="text-sm font-medium text-foreground">
+            Aplicar <span className="text-on-primary-soft">{nomeDe(dialogo.novo)}</span> a:
+          </p>
+          <div className="mt-2 space-y-1.5">
+            {dialogo.opcoes.map((o) => (
+              <label key={o.escopo} className="flex cursor-pointer items-start gap-2 rounded-md px-1.5 py-1 text-xs hover:bg-secondary">
+                <input
+                  type="radio"
+                  name={`escopo-${movimentacaoId}`}
+                  checked={dialogo.escopo === o.escopo}
+                  onChange={() => setDialogo({ ...dialogo, escopo: o.escopo })}
+                  className="mt-0.5 accent-primary"
+                />
+                <span className="min-w-0">
+                  <span className="block text-foreground">
+                    {o.escopo === "so_esta" ? "Só esta linha" : `Todas com ${o.rotulo}`}
+                  </span>
+                  <span className="block text-muted-foreground">
+                    {o.escopo === "so_esta"
+                      ? "Exceção manual: regra nenhuma muda."
+                      : o.iguais > 0
+                        ? `Esta e mais ${o.iguais} linha(s), passadas e futuras.`
+                        : "Só esta por enquanto; vale para as próximas iguais."}
+                  </span>
+                </span>
+              </label>
+            ))}
+          </div>
+          <div className="mt-3 flex justify-end gap-1.5">
+            <Button type="button" size="sm" variant="ghost" onClick={() => setDialogo(null)}>
+              Cancelar
+            </Button>
+            <Button type="button" size="sm" onClick={() => aplicar(dialogo.novo, dialogo.escopo)}>
+              Aplicar
+            </Button>
+          </div>
+        </div>
       ) : null}
     </div>
   );
@@ -249,5 +334,60 @@ export function CentroSelect({
         </option>
       ))}
     </select>
+  );
+}
+
+/** Anotação livre da linha: um ícone que abre o campo; vazio apaga. */
+export function Observacao({ movimentacaoId, texto }: { movimentacaoId: string; texto: string | null }) {
+  const [editando, setEditando] = useState(false);
+  const [valor, setValor] = useState(texto ?? "");
+  const [salvando, startTransition] = useTransition();
+
+  function salvar() {
+    setEditando(false);
+    const novo = valor.trim();
+    if (novo === (texto ?? "")) return;
+    startTransition(async () => {
+      const r = await editarObservacaoAction(movimentacaoId, novo);
+      if (r.erro) toast.error(r.erro);
+      else toast.success(novo ? "Anotação salva." : "Anotação apagada.");
+    });
+  }
+
+  if (editando) {
+    return (
+      <input
+        autoFocus
+        value={valor}
+        maxLength={200}
+        onChange={(e) => setValor(e.target.value)}
+        onBlur={salvar}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") e.currentTarget.blur();
+          if (e.key === "Escape") {
+            setValor(texto ?? "");
+            setEditando(false);
+          }
+        }}
+        aria-label="Anotação"
+        placeholder="Anotação (ex.: adiantamento de férias)"
+        className="mt-1 h-7 w-full rounded-md border border-ring bg-card px-2 text-xs outline-none ring-2 ring-ring/20"
+      />
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={() => setEditando(true)}
+      title={texto ? "Editar anotação" : "Anotar"}
+      className={cn(
+        "mt-0.5 inline-flex max-w-full items-center gap-1 text-left text-xs",
+        texto ? "text-on-primary-soft" : "text-muted-foreground opacity-50 hover:opacity-100",
+        salvando && "opacity-60"
+      )}
+    >
+      <MessageSquareText className="size-3 shrink-0" />
+      {texto ? <span className="truncate">{texto}</span> : null}
+    </button>
   );
 }

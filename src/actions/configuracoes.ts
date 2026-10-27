@@ -14,7 +14,8 @@ import {
   tipoLinhaDreEnum,
   vendasPorProduto,
 } from "@/db/schema";
-import { obterSessao } from "@/lib/auth";
+import { registrar } from "@/lib/auditoria";
+import { exigirEdicao } from "@/lib/permissoes";
 import { aplicarRegras } from "@/lib/categorizacao";
 import { eViolacaoDeUnicidade } from "@/lib/db-erros";
 import { lerCsvDeVendas } from "@/lib/vendas-por-produto";
@@ -76,7 +77,8 @@ const linhaSchema = z
 
 /** Cria (id null) ou edita uma linha da DRE. O tipo (grupo ou subtotal) só se escolhe ao criar. */
 export async function salvarLinhaAction(id: string | null, _prev: ConfigFormState, formData: FormData): Promise<ConfigFormState> {
-  if (!(await obterSessao())) return { erro: "Sessão expirada." };
+  const acesso = await exigirEdicao();
+  if ("erro" in acesso) return { erro: acesso.erro };
   if (id && !uuid.safeParse(id).success) return { erro: "Linha inválida." };
 
   const atual = id ? (await db.select().from(linhasDre).where(eq(linhasDre.id, id)).limit(1))[0] : undefined;
@@ -127,6 +129,7 @@ export async function salvarLinhaAction(id: string | null, _prev: ConfigFormStat
     throw err;
   }
 
+  await registrar(acesso.sessao, { acao: id ? "editar" : "criar", alvoTipo: "linha_dre", alvoId: id, detalhe: { nome: dados.nome } });
   revalidarTudo();
   return {
     ok: id
@@ -138,7 +141,8 @@ export async function salvarLinhaAction(id: string | null, _prev: ConfigFormStat
 }
 
 export async function moverLinhaAction(formData: FormData) {
-  if (!(await obterSessao())) return;
+  const acesso = await exigirEdicao();
+  if ("erro" in acesso) return;
   const m = movimento.safeParse({ id: formData.get("id"), direcao: formData.get("direcao") });
   if (!m.success) return;
   const linhas = await db.select({ id: linhasDre.id }).from(linhasDre).orderBy(asc(linhasDre.ordem), asc(linhasDre.nome));
@@ -156,12 +160,14 @@ export async function moverLinhaAction(formData: FormData) {
 
 /** Só apaga linha sem categoria — categoria sem linha sumiria da DRE. */
 export async function excluirLinhaAction(formData: FormData) {
-  if (!(await obterSessao())) return;
+  const acesso = await exigirEdicao();
+  if ("erro" in acesso) return;
   const id = String(formData.get("id") ?? "");
   if (!uuid.safeParse(id).success) return;
   const [uso] = await db.select({ n: sql<number>`count(*)::int` }).from(categorias).where(eq(categorias.linhaId, id));
   if ((uso?.n ?? 0) > 0) return;
   await db.delete(linhasDre).where(eq(linhasDre.id, id));
+  await registrar(acesso.sessao, { acao: "apagar", alvoTipo: "linha_dre", alvoId: id });
   revalidarTudo();
 }
 
@@ -182,7 +188,8 @@ export async function salvarCategoriaAction(
   _prev: ConfigFormState,
   formData: FormData
 ): Promise<ConfigFormState> {
-  if (!(await obterSessao())) return { erro: "Sessão expirada." };
+  const acesso = await exigirEdicao();
+  if ("erro" in acesso) return { erro: acesso.erro };
   if (id && !uuid.safeParse(id).success) return { erro: "Categoria inválida." };
 
   const parsed = categoriaSchema.safeParse({
@@ -236,6 +243,7 @@ export async function salvarCategoriaAction(
 
   // O centro padrão vai para os lançamentos da categoria que não têm exceção.
   if (antes && antes.centroCustoId !== dados.centroCustoId) await aplicarRegras();
+  await registrar(acesso.sessao, { acao: id ? "editar" : "criar", alvoTipo: "categoria", alvoId: id, detalhe: { nome: dados.nome } });
   revalidarTudo();
   return { ok: id ? "Categoria salva." : "Categoria criada." };
 }
@@ -248,7 +256,8 @@ export async function salvarCategoriaAction(
  * Mês e linha já existentes são substituídos.
  */
 export async function salvarVendasPorProdutoAction(_prev: ConfigFormState, formData: FormData): Promise<ConfigFormState> {
-  if (!(await obterSessao())) return { erro: "Sessão expirada." };
+  const acesso = await exigirEdicao();
+  if ("erro" in acesso) return { erro: acesso.erro };
   const lido = lerCsvDeVendas(String(formData.get("csv") ?? ""));
   if ("erro" in lido) return { erro: lido.erro };
   if (lido.linhas.length === 0) return { erro: "Nenhuma linha para gravar." };
@@ -264,13 +273,15 @@ export async function salvarVendasPorProdutoAction(_prev: ConfigFormState, formD
         });
     }
   });
-  revalidarTudo();
   const meses = new Set(lido.linhas.map((l) => l.mes));
+  await registrar(acesso.sessao, { acao: "editar", alvoTipo: "loja", detalhe: { meses: [...meses] } });
+  revalidarTudo();
   return { ok: `${lido.linhas.length} linha(s) gravada(s) em ${meses.size} mês(es).` };
 }
 
 export async function moverCategoriaAction(formData: FormData) {
-  if (!(await obterSessao())) return;
+  const acesso = await exigirEdicao();
+  if ("erro" in acesso) return;
   const m = movimento.safeParse({ id: formData.get("id"), direcao: formData.get("direcao") });
   if (!m.success) return;
   const [cat] = await db.select({ linhaId: categorias.linhaId }).from(categorias).where(eq(categorias.id, m.data.id)).limit(1);
@@ -300,7 +311,8 @@ const centroSchema = z.object({
 });
 
 export async function salvarCentroAction(id: string | null, _prev: ConfigFormState, formData: FormData): Promise<ConfigFormState> {
-  if (!(await obterSessao())) return { erro: "Sessão expirada." };
+  const acesso = await exigirEdicao();
+  if ("erro" in acesso) return { erro: acesso.erro };
   if (id && !uuid.safeParse(id).success) return { erro: "Centro inválido." };
   const parsed = centroSchema.safeParse({
     nome: formData.get("nome") ?? "",
@@ -319,12 +331,14 @@ export async function salvarCentroAction(id: string | null, _prev: ConfigFormSta
     if (eViolacaoDeUnicidade(err)) return { erro: "Já existe um centro de custo com esse nome." };
     throw err;
   }
+  await registrar(acesso.sessao, { acao: id ? "editar" : "criar", alvoTipo: "centro_custo", alvoId: id, detalhe: { nome: parsed.data.nome } });
   revalidarTudo();
   return { ok: id ? "Centro salvo." : "Centro criado." };
 }
 
 export async function moverCentroAction(formData: FormData) {
-  if (!(await obterSessao())) return;
+  const acesso = await exigirEdicao();
+  if ("erro" in acesso) return;
   const m = movimento.safeParse({ id: formData.get("id"), direcao: formData.get("direcao") });
   if (!m.success) return;
   const centros = await db.select({ id: centrosCusto.id }).from(centrosCusto).orderBy(asc(centrosCusto.ordem), asc(centrosCusto.nome));
@@ -345,10 +359,12 @@ export async function moverCentroAction(formData: FormData) {
  * apontavam para ele (o banco faz isso sozinho) e recalcula o resto.
  */
 export async function excluirCentroAction(formData: FormData) {
-  if (!(await obterSessao())) return;
+  const acesso = await exigirEdicao();
+  if ("erro" in acesso) return;
   const id = String(formData.get("id") ?? "");
   if (!uuid.safeParse(id).success) return;
   await db.delete(centrosCusto).where(eq(centrosCusto.id, id));
+  await registrar(acesso.sessao, { acao: "apagar", alvoTipo: "centro_custo", alvoId: id });
   await aplicarRegras();
   revalidarTudo();
 }

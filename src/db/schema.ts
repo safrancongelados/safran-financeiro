@@ -45,14 +45,114 @@ export const linhaProdutoEnum = pgEnum("linha_produto", ["marmitas", "porcoes", 
 /** Em que campo da movimentação a regra procura o padrão. */
 export const campoRegraEnum = pgEnum("campo_regra", ["documento", "contraparte", "descricao"]);
 export const sentidoRegraEnum = pgEnum("sentido_regra", ["entrada", "saida", "ambos"]);
-export const origemCategoriaEnum = pgEnum("origem_categoria", ["regra", "manual"]);
+/**
+ * De onde veio a categoria: de uma regra, da categoria padrão da pessoa, da
+ * ida que um estorno devolve, ou escolhida à mão ("só nesta", que regra
+ * nenhuma muda).
+ */
+export const origemCategoriaEnum = pgEnum("origem_categoria", ["regra", "manual", "pessoa", "estorno"]);
 
-/** Quem acessa o sistema. Sem cadastro público: contas criadas por script. */
+/**
+ * O que cada acesso pode fazer. `dono` administra usuários; `financeiro`
+ * categoriza e configura; `leitura` só vê (o contador, por exemplo).
+ */
+export const papelUsuarioEnum = pgEnum("papel_usuario", ["dono", "financeiro", "leitura"]);
+
+/** Quem acessa o sistema. Sem cadastro público: contas criadas pelo dono em Configurações ou por script. */
 export const usuarios = pgTable("usuarios", {
   id: uuid("id").primaryKey().defaultRandom(),
   nome: text("nome").notNull(),
   email: text("email").notNull().unique(),
   senhaHash: text("senha_hash").notNull(),
+  papel: papelUsuarioEnum("papel").notNull().default("dono"),
+  /** Desativado não entra, mas o histórico do que fez fica. */
+  ativo: boolean("ativo").notNull().default(true),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Funcionário, sócio, fornecedor ou cliente: quem está do outro lado do lançamento. */
+export const tipoPessoaEnum = pgEnum("tipo_pessoa", ["funcionario", "socio", "fornecedor", "cliente", "outro"]);
+
+/**
+ * Cadastro de quem recebe ou paga. Uma pessoa é reconhecida pelo CPF/CNPJ
+ * ou por trechos do nome que o banco manda (`padroes`, já normalizados); o
+ * sync liga cada movimentação à pessoa (`movimentacoes.pessoa_id`). A
+ * categoria padrão vale quando nenhuma regra decide — "tudo que vai para
+ * Maria é salário" nasce aqui. A meta mensal alimenta o relatório de
+ * pessoal e o alerta de pró-labore acima do combinado.
+ */
+export const pessoas = pgTable(
+  "pessoas",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    nome: text("nome").notNull(),
+    tipo: tipoPessoaEnum("tipo").notNull().default("outro"),
+    /** Só dígitos; único quando informado. */
+    documento: text("documento").unique(),
+    /** Trechos de contraparte ou descrição, normalizados (sem acento, minúsculo). */
+    padroes: text("padroes").array().notNull().default([]),
+    categoriaId: uuid("categoria_id").references(() => categorias.id, { onDelete: "set null" }),
+    metaMensalCentavos: integer("meta_mensal_centavos"),
+    ativa: boolean("ativa").notNull().default(true),
+    notas: text("notas"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("pessoa_tipo_idx").on(t.tipo)]
+);
+
+/**
+ * Quem mudou o quê. Toda edição de categoria, nome, centro, regra, pessoa
+ * ou estrutura deixa uma linha aqui, para o extrato poder responder "por
+ * que esta linha está assim?".
+ */
+export const auditoria = pgTable(
+  "auditoria",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    usuarioId: uuid("usuario_id").references(() => usuarios.id, { onDelete: "set null" }),
+    /** Guardado à parte: o usuário pode ser apagado, o registro fica. */
+    usuarioNome: text("usuario_nome").notNull(),
+    /** categoria, nome, centro, so_nesta, lote, regra, pessoa, linha_dre, categoria_dre, usuario... */
+    acao: text("acao").notNull(),
+    alvoTipo: text("alvo_tipo").notNull(),
+    alvoId: text("alvo_id"),
+    /** O que mudou, de → para, e quantas linhas foram afetadas. */
+    detalhe: jsonb("detalhe"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("auditoria_data_idx").on(t.createdAt), index("auditoria_alvo_idx").on(t.alvoTipo, t.alvoId)]
+);
+
+export const tipoAlertaEnum = pgEnum("tipo_alerta", [
+  "saldo_minimo",
+  "despesa_acima_media",
+  "lancamento_grande_sem_categoria",
+  "pessoa_acima_meta",
+  "fornecedor_novo",
+  "sync_parado",
+  "imposto_previsto",
+]);
+
+/**
+ * Um alerta configurável por tipo. Os parâmetros variam (valor em centavos,
+ * percentual, dias); a avaliação mora em `lib/alertas.ts`.
+ */
+export const alertas = pgTable("alertas", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  tipo: tipoAlertaEnum("tipo").notNull().unique(),
+  parametros: jsonb("parametros").notNull().default({}),
+  ativo: boolean("ativo").notNull().default(true),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Uma combinação de filtros do extrato com nome, para voltar a ela num clique. */
+export const visoesSalvas = pgTable("visoes_salvas", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  nome: text("nome").notNull(),
+  /** A query string do extrato, sem o "?". */
+  params: text("params").notNull(),
+  ordem: integer("ordem").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -219,6 +319,10 @@ export const movimentacoesBancarias = pgTable(
     nomeExibicao: text("nome_exibicao"),
     /** Exceção da regra ou o padrão da categoria. Gravado por aplicarRegras. */
     centroCustoId: uuid("centro_custo_id").references(() => centrosCusto.id, { onDelete: "set null" }),
+    /** Quem está do outro lado, quando reconhecido pelo cadastro de pessoas. Gravado por aplicarRegras. */
+    pessoaId: uuid("pessoa_id").references(() => pessoas.id, { onDelete: "set null" }),
+    /** Anotação livre de quem categorizou ("adiantamento de férias"). */
+    observacao: text("observacao"),
     payloadBruto: jsonb("payload_bruto"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -229,6 +333,7 @@ export const movimentacoesBancarias = pgTable(
     index("movimentacao_categoria_idx").on(t.categoriaId),
     index("movimentacao_regra_idx").on(t.regraId),
     index("movimentacao_centro_idx").on(t.centroCustoId),
+    index("movimentacao_pessoa_idx").on(t.pessoaId),
   ]
 );
 
@@ -243,3 +348,9 @@ export type CampoRegra = (typeof campoRegraEnum.enumValues)[number];
 export type SentidoRegra = (typeof sentidoRegraEnum.enumValues)[number];
 export type Categoria = typeof categorias.$inferSelect;
 export type Regra = typeof regrasCategorizacao.$inferSelect;
+export type PapelUsuario = (typeof papelUsuarioEnum.enumValues)[number];
+export type TipoPessoa = (typeof tipoPessoaEnum.enumValues)[number];
+export type Pessoa = typeof pessoas.$inferSelect;
+export type TipoAlerta = (typeof tipoAlertaEnum.enumValues)[number];
+export type Alerta = typeof alertas.$inferSelect;
+export type VisaoSalva = typeof visoesSalvas.$inferSelect;
