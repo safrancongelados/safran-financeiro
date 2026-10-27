@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 import { and, asc, eq, gte, lt, sql } from "drizzle-orm";
 import { db } from "@/db";
+import { alertasDisparados } from "@/db/queries/alertas";
+import { previsoesDoMes } from "@/db/queries/recorrencias";
 import { buscarContas, buscarItem, PluggyErro } from "@/lib/pluggy/client";
 import { categoriasParaDre, listarLinhasDre, somasPorMesECategoria } from "@/db/queries/financeiro";
 import { montarDre } from "@/lib/dre";
-import { deslocarMes, intervaloDoMes, mesValido } from "@/lib/periodo";
+import { deslocarMes, hojeISO, intervaloDoMes, mesValido } from "@/lib/periodo";
 import { regraAPartirDe, sentidoDe } from "@/lib/regras";
 import {
   categorias,
@@ -39,6 +41,10 @@ export const maxDuration = 30;
  * Com `&item=<id>`, pergunta também à Pluggy se as credenciais da Safran
  * enxergam aquela conexão (só leitura, nada é gravado). Serve para saber se
  * uma conexão do Meu Pluggy já foi liberada para a aplicação.
+ *
+ * Com `&alertas=1`, roda o motor de alertas e a previsão de recorrentes e
+ * devolve os títulos — para conferir, sem entrar no sistema, que o Início
+ * está calculando.
  */
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -344,12 +350,24 @@ export async function GET(request: Request) {
     const dre = mesDre && mesValido(mesDre) ? await resumirDre(mesDre) : undefined;
     const mesNomes = new URL(request.url).searchParams.get("nomes");
     const nomes = mesNomes && mesValido(mesNomes) ? await nomesDoMes(mesNomes) : undefined;
+    const alertas =
+      new URL(request.url).searchParams.get("alertas") === "1"
+        ? await (async () => {
+            const hoje = hojeISO();
+            const [disparados, previsoes] = await Promise.all([alertasDisparados(hoje), previsoesDoMes(hoje)]);
+            return {
+              disparados: disparados.map((a) => `${a.tipo}: ${a.titulo}`),
+              previstos: previsoes.map((p) => `${p.dataPrevista} · ${p.nome}${p.pagoNoMes ? " (pago)" : ""}`),
+            };
+          })()
+        : undefined;
 
     return NextResponse.json({
       ...(pluggy ? { pluggy } : {}),
       ...(detalhe ? { detalhe } : {}),
       ...(dre ? { dre } : {}),
       ...(nomes ? { nomes } : {}),
+      ...(alertas ? { alertas } : {}),
       banco: { ok: true, latenciaMs },
       conexoes,
       contas,
