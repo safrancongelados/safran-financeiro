@@ -10,13 +10,15 @@ const ABAS = [
   { href: "/configuracoes/regras", label: "Regras" },
   { href: "/configuracoes/loja", label: "Loja (mix de vendas)" },
   { href: "/configuracoes/conexao", label: "Conexão bancária" },
+  { href: "/configuracoes/historico", label: "Histórico" },
+  { href: "/configuracoes/usuarios", label: "Acessos", soDono: true },
 ];
 
-export function AbasConfiguracoes() {
+export function AbasConfiguracoes({ dono }: { dono: boolean }) {
   const pathname = usePathname();
   return (
     <nav aria-label="Seções das configurações" className="mb-6 flex gap-1 overflow-x-auto border-b border-border">
-      {ABAS.map((aba) => {
+      {ABAS.filter((aba) => !aba.soDono || dono).map((aba) => {
         const ativa = pathname === aba.href;
         return (
           <Link

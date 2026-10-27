@@ -4,27 +4,17 @@
  * contador, por exemplo. A checagem fica nas server actions, que são a
  * única porta de escrita.
  */
-import type { PapelUsuario } from "@/db/schema";
 import { obterSessao, type SessionPayload } from "./auth";
+import { papelEdita, papelGereAcessos } from "./papeis";
 
-export const PAPEL_LABEL: Record<PapelUsuario, string> = {
-  dono: "Dono",
-  financeiro: "Financeiro",
-  leitura: "Somente leitura",
-};
-
-export const PAPEL_DESCRICAO: Record<PapelUsuario, string> = {
-  dono: "Tudo, inclusive criar e remover acessos.",
-  financeiro: "Categoriza, cadastra pessoas e muda a estrutura; não mexe em acessos.",
-  leitura: "Só vê extrato, DRE e relatórios.",
-};
+export { PAPEL_DESCRICAO, PAPEL_LABEL } from "./papeis";
 
 export function podeEditar(sessao: SessionPayload | null): boolean {
-  return sessao?.papel === "dono" || sessao?.papel === "financeiro";
+  return papelEdita(sessao?.papel);
 }
 
 export function podeGerirAcessos(sessao: SessionPayload | null): boolean {
-  return sessao?.papel === "dono";
+  return papelGereAcessos(sessao?.papel);
 }
 
 type Exigencia = { sessao: SessionPayload } | { erro: string };

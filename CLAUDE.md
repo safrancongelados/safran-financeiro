@@ -12,6 +12,12 @@ bancária única da empresa (Pluggy / Open Finance). Ver `README.md`.
 - DRE em regime de caixa; a estrutura (tabela `linhas_dre`) e o plano de
   contas (`categorias.linha_id`) são editáveis em Configurações, e as
   mudanças de estrutura vão por migration de dados (ver `drizzle/0005`).
+- Toda action que grava passa por `exigirEdicao`/`exigirDono`
+  (`src/lib/permissoes.ts`) e registra em `auditoria` (`src/lib/auditoria.ts`).
+  Lógica de decisão (regras, pessoas, estornos, alertas, sugestões,
+  recorrências, relatórios) fica em módulos puros em `src/lib/`, sem I/O,
+  testáveis com números na mão; as leituras do banco ficam em
+  `src/db/queries/`.
 - Contas próprias da Safran: GitHub `safrancongelados`, Vercel, Supabase
   (projeto "financas") e Pluggy. Nunca commitar credenciais.
 

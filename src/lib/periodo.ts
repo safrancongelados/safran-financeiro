@@ -80,15 +80,20 @@ export function rotuloDia(data: string): string {
   return `${data.slice(8, 10)}/${data.slice(5, 7)}`;
 }
 
-// ── Período da DRE e do fluxo de caixa ─────────────────────────────────────
+// ── Período da DRE, do fluxo de caixa e dos relatórios ─────────────────────
 
-/** Ano civil ou os últimos 12 meses (o Open Finance traz cerca de um ano de histórico). */
-export type Periodo = { tipo: "ano"; ano: number } | { tipo: "12m" };
+/** Ano civil ou os últimos N meses (o Open Finance traz cerca de um ano de histórico). */
+export type Periodo = { tipo: "ano"; ano: number } | { tipo: "meses"; n: 3 | 6 | 12 };
 
-/** Lê `?periodo=12m` ou `?ano=YYYY`; sem nada (ou inválido), o ano corrente. */
+const MESES_RAPIDOS = [3, 6, 12] as const;
+
+/** Lê `?periodo=12m` (ou 3m, 6m) ou `?ano=YYYY`; sem nada (ou inválido), o ano corrente. */
 export function lerPeriodo(params: { periodo?: unknown; ano?: unknown }, hoje: string): Periodo {
   const anoCorrente = Number(hoje.slice(0, 4));
-  if (params.periodo === "12m") return { tipo: "12m" };
+  if (typeof params.periodo === "string") {
+    const n = Number(params.periodo.replace("m", ""));
+    if ((MESES_RAPIDOS as readonly number[]).includes(n)) return { tipo: "meses", n: n as 3 | 6 | 12 };
+  }
   if (typeof params.ano === "string" && anoValido(params.ano) && Number(params.ano) <= anoCorrente) {
     return { tipo: "ano", ano: Number(params.ano) };
   }
@@ -97,7 +102,7 @@ export function lerPeriodo(params: { periodo?: unknown; ano?: unknown }, hoje: s
 
 /** Os meses do período, até o mês corrente — mês que ainda não chegou não tem coluna. */
 export function mesesDoPeriodo(periodo: Periodo, hoje: string): string[] {
-  if (periodo.tipo === "12m") return ultimosMeses(12, hoje);
+  if (periodo.tipo === "meses") return ultimosMeses(periodo.n, hoje);
   return mesesDoAno(periodo.ano).filter((m) => m <= hoje);
 }
 
@@ -108,9 +113,9 @@ export function intervaloDoPeriodo(periodo: Periodo, hoje: string): { inicio: st
 }
 
 export function rotuloPeriodo(periodo: Periodo): string {
-  return periodo.tipo === "12m" ? "Últimos 12 meses" : String(periodo.ano);
+  return periodo.tipo === "meses" ? `Últimos ${periodo.n} meses` : String(periodo.ano);
 }
 
 export function paramsDoPeriodo(periodo: Periodo): Record<string, string> {
-  return periodo.tipo === "12m" ? { periodo: "12m" } : { ano: String(periodo.ano) };
+  return periodo.tipo === "meses" ? { periodo: `${periodo.n}m` } : { ano: String(periodo.ano) };
 }

@@ -299,6 +299,46 @@ export async function categorizarEmLoteAction(
   return { alteradas: alteradas.length };
 }
 
+/**
+ * A caixa de revisão aprovando sugestões em lote: para cada linha, grava a
+ * categoria na regra da identidade dela (como a edição no extrato faria,
+ * uma a uma) e reaplica tudo uma vez só no fim.
+ */
+export async function aplicarSugestoesAction(
+  itens: { movimentacaoId: string; categoriaId: string }[]
+): Promise<{ erro?: string; regras?: number; alteradas?: number }> {
+  const acesso = await exigirEdicao();
+  if ("erro" in acesso) return { erro: acesso.erro };
+  const validos = itens.filter((i) => uuid.safeParse(i.movimentacaoId).success && uuid.safeParse(i.categoriaId).success).slice(0, 200);
+  if (validos.length === 0) return { erro: "Nada para aplicar." };
+
+  let regras = 0;
+  for (const item of validos) {
+    const mov = await buscarMovimentacao(item.movimentacaoId);
+    if (!mov) continue;
+    const identidade = identidadesDe(mov)[0];
+    if (!identidade) {
+      await db
+        .update(movimentacoesBancarias)
+        .set({ categoriaId: item.categoriaId, categorizadaPor: "manual", updatedAt: new Date() })
+        .where(eq(movimentacoesBancarias.id, mov.id));
+      continue;
+    }
+    await db
+      .insert(regrasCategorizacao)
+      .values({ campo: identidade.campo, padrao: identidade.padrao, sentido: identidade.sentido, categoriaId: item.categoriaId })
+      .onConflictDoUpdate({
+        target: [regrasCategorizacao.campo, regrasCategorizacao.padrao, regrasCategorizacao.sentido],
+        set: { categoriaId: item.categoriaId },
+      });
+    regras++;
+  }
+  const alteradas = await aplicarRegras();
+  await registrar(acesso.sessao, { acao: "lote", alvoTipo: "regra", detalhe: { origem: "revisao", regras, alteradas } });
+  revalidarTudo();
+  return { regras, alteradas };
+}
+
 /** Anotação livre numa linha ("adiantamento de férias"). Vazio apaga. */
 export async function editarObservacaoAction(movimentacaoId: string, texto: string): Promise<{ erro?: string }> {
   const acesso = await exigirEdicao();

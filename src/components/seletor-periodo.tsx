@@ -2,8 +2,8 @@ import { paramsDoPeriodo, type Periodo } from "@/lib/periodo";
 import { Chip, GrupoChips } from "@/components/chip";
 
 /**
- * Período da DRE e do fluxo de caixa: os últimos 12 meses ou um ano civil
- * (os anos em que houve movimento, mais o corrente).
+ * Período da DRE, do fluxo de caixa e dos relatórios: os últimos 3, 6 ou 12
+ * meses ou um ano civil (os anos em que houve movimento, mais o corrente).
  */
 export function SeletorPeriodo({
   base,
@@ -25,9 +25,11 @@ export function SeletorPeriodo({
   };
   return (
     <GrupoChips>
-      <Chip href={href({ tipo: "12m" })} ativo={periodo.tipo === "12m"}>
-        Últimos 12 meses
-      </Chip>
+      {([3, 6, 12] as const).map((n) => (
+        <Chip key={n} href={href({ tipo: "meses", n })} ativo={periodo.tipo === "meses" && periodo.n === n}>
+          {n} meses
+        </Chip>
+      ))}
       {anos.map((ano) => (
         <Chip key={ano} href={href({ tipo: "ano", ano })} ativo={periodo.tipo === "ano" && periodo.ano === ano}>
           {ano}

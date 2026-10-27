@@ -2,6 +2,7 @@ import Link from "next/link";
 import {
   ArrowRight,
   BarChart3,
+  CalendarClock,
   CircleAlert,
   Landmark,
   Receipt,
@@ -9,6 +10,9 @@ import {
   TrendingUp,
   Wallet,
 } from "lucide-react";
+import { alertasDisparados } from "@/db/queries/alertas";
+import { previsoesDoMes } from "@/db/queries/recorrencias";
+import { hrefExtrato } from "@/lib/extrato-filtros";
 import {
   categoriasParaDre,
   contarSemCategoria,
@@ -58,11 +62,6 @@ function formatarDiferenca(centavos: number): string {
   return `${centavos >= 0 ? "+" : "−"}${formatarCentavos(Math.abs(centavos))}`;
 }
 
-/** Dias entre duas datas YYYY-MM-DD. */
-function diasEntre(a: string, b: string): number {
-  return Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000);
-}
-
 export default async function InicioPage() {
   const hoje = hojeISO();
   const mes = hoje.slice(0, 7);
@@ -86,7 +85,7 @@ export default async function InicioPage() {
     );
   }
 
-  const [linhasConfig, categorias, somas, somasAnterior, saldo, semCategoria, recentes, mix] = await Promise.all([
+  const [linhasConfig, categorias, somas, somasAnterior, saldo, semCategoria, recentes, mix, alertas, previsoes] = await Promise.all([
     listarLinhasDre(),
     categoriasParaDre(),
     somasPorMesECategoria(`${meses[0]}-01`, `${deslocarMes(mes, 1)}-01`),
@@ -95,6 +94,8 @@ export default async function InicioPage() {
     contarSemCategoria(),
     listarMovimentacoesRecentes(8),
     mixPorMes(`${meses[0]}-01`, `${deslocarMes(mes, 1)}-01`),
+    alertasDisparados(hoje),
+    previsoesDoMes(hoje),
   ]);
 
   const dre = montarDre(meses, linhasConfig, categorias, somas, mix);
@@ -131,20 +132,17 @@ export default async function InicioPage() {
       pendencias.push({ texto: `${c.instituicao ?? "Banco"}: o último sync falhou (${c.ultimoSyncDetalhe ?? "sem detalhe"}).`, href: "/configuracoes/conexao", acao: "Ver conexão", grave: true });
     }
   }
-  if (ultimaData && diasEntre(ultimaData, hoje) >= 4) {
-    pendencias.push({
-      texto: `Nenhum lançamento novo desde ${rotuloDia(ultimaData)}. Se houve movimento na conta, sincronize ou confira a conexão.`,
-      href: "/configuracoes/conexao",
-      acao: "Ver conexão",
-    });
-  }
   if (semCategoria > 0) {
     pendencias.push({
       texto: `${semCategoria} lançamento(s) sem categoria ficam fora das linhas da DRE.`,
-      href: "/extrato?categoria=sem",
-      acao: "Categorizar",
+      href: "/revisar",
+      acao: "Revisar",
     });
   }
+  // Os alertas configuráveis (saldo, categoria acima da média, imposto que não saiu...).
+  for (const a of alertas) pendencias.push({ texto: a.titulo, href: a.href, acao: a.acao, grave: a.gravidade === "alta" });
+  const aPagar = previsoes.filter((p) => !p.pagoNoMes);
+  const totalPrevisto = aPagar.reduce((acc, p) => acc + p.valorCentavos, 0);
 
   const totalDespesas = despesas.reduce((acc, d) => acc + d.centavos, 0);
 
@@ -200,6 +198,35 @@ export default async function InicioPage() {
           href={semCategoria > 0 ? "/extrato?categoria=sem" : undefined}
         />
       </div>
+
+      {previsoes.length > 0 ? (
+        <Card className="mb-5 gap-0 py-0">
+          <div className="flex flex-wrap items-center justify-between gap-2 px-5 pt-4 pb-2">
+            <div>
+              <CardTitle>
+                <CalendarClock className="mr-1.5 inline size-4 text-muted-foreground" />
+                Previsto nos próximos 30 dias
+              </CardTitle>
+              <CardDescription className="mt-1">
+                O que se repete todo mês em dia parecido, pelos últimos meses. {aPagar.length > 0 ? `${formatarCentavos(-totalPrevisto)} ainda por sair.` : "Tudo deste mês já saiu."}
+              </CardDescription>
+            </div>
+          </div>
+          <ul className="grid grid-cols-1 divide-y divide-border sm:grid-cols-2 sm:divide-y-0 lg:grid-cols-3">
+            {previsoes.slice(0, 9).map((p) => (
+              <li key={`${p.busca}-${p.dataPrevista}`} className={cn("flex items-center gap-3 px-5 py-2.5 text-sm", p.pagoNoMes && "opacity-60")}>
+                <span className="w-11 shrink-0 tabular-nums text-muted-foreground">{rotuloDia(p.dataPrevista)}</span>
+                <Link href={hrefExtrato({ mes, periodo: "6m", q: p.busca.slice(0, 80), tipo: "saida" })} className="min-w-0 flex-1 truncate text-foreground hover:underline">
+                  {p.nome}
+                  {p.categoriaNome ? <span className="ml-1 text-xs text-muted-foreground">· {p.categoriaNome}</span> : null}
+                </Link>
+                <span className="shrink-0 tabular-nums">{formatarCentavos(-p.valorCentavos)}</span>
+                {p.pagoNoMes ? <Badge variant="success">pago</Badge> : null}
+              </li>
+            ))}
+          </ul>
+        </Card>
+      ) : null}
 
       <div className="mb-5 grid grid-cols-1 gap-5 lg:grid-cols-3">
         <Card className="gap-4 lg:col-span-2">
