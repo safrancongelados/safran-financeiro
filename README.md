@@ -76,6 +76,12 @@ DRE e no fluxo — no cartão, o dinheiro sai quando a fatura é paga.
 - Todo valor é **inteiro em centavos**, com o sinal do caixa: positivo entrou,
   negativo saiu.
 - Transações **pendentes** ficam de fora até serem efetivadas.
+- **Estornos** (reembolso, pagamento cancelado, transferência cancelada)
+  ficam no extrato, porque mexeram no saldo, mas são pareados com a ida —
+  mesmo valor com sinal trocado, na mesma conta, até 10 dias antes — e
+  herdam a categoria dela, para os dois se anularem na mesma linha da DRE
+  (`src/lib/estornos.ts`, selo *estorno* no extrato). Estorno sem ida
+  encontrada cai em "Estornos e pagamentos cancelados", fora da DRE.
 - Lançamento apagado pelo banco (webhook `transactions/deleted`) sai do
   extrato; conexão apagada fica marcada, com o histórico preservado.
 

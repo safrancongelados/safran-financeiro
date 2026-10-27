@@ -1,11 +1,13 @@
 /**
  * Aplica as regras de categorização no banco. A decisão em si mora em
- * `lib/regras.ts`; aqui só se lê, decide e grava em lote.
+ * `lib/regras.ts` (regras) e `lib/estornos.ts` (pareamento de estornos); aqui
+ * só se lê, decide e grava em lote.
  */
 import { and, eq, inArray, isNull, or } from "drizzle-orm";
 import { db } from "@/db";
 import { categorias, movimentacoesBancarias, regrasCategorizacao } from "@/db/schema";
 import { codigoPostgres } from "./db-erros";
+import { parearEstornos } from "./estornos";
 import { ordenarRegras, resolverRegras } from "./regras";
 
 const LOTE = 1000;
@@ -19,7 +21,8 @@ function agrupar<K>(mapa: Map<string, { chave: K; ids: string[] }>, chave: K, id
 
 /**
  * Recalcula, para toda movimentação:
- * - a categoria, nas que não foram categorizadas à mão;
+ * - a categoria, nas que não foram categorizadas à mão: pelas regras ou, num
+ *   estorno com a ida encontrada, a categoria da ida (ver `lib/estornos.ts`);
  * - o nome de exibição e o centro de custo, em todas — o centro vem da
  *   exceção de uma regra ou, sem exceção, do padrão da categoria.
  *
@@ -39,6 +42,8 @@ export async function aplicarRegras(): Promise<number> {
   const movimentacoes = await db
     .select({
       id: movimentacoesBancarias.id,
+      contaId: movimentacoesBancarias.contaId,
+      data: movimentacoesBancarias.data,
       valorCentavos: movimentacoesBancarias.valorCentavos,
       contraparte: movimentacoesBancarias.contraparte,
       contraparteDocumento: movimentacoesBancarias.contraparteDocumento,
@@ -51,15 +56,34 @@ export async function aplicarRegras(): Promise<number> {
     })
     .from(movimentacoesBancarias);
 
+  // Primeiro a categoria que cada linha teria só pelas regras (ou à mão):
+  // é o que a ida de um estorno passa adiante.
+  const resolucoes = new Map(movimentacoes.map((mov) => [mov.id, resolverRegras(mov, ordenadas)]));
+  const categoriaPropria = new Map(
+    movimentacoes.map((mov) => [
+      mov.id,
+      mov.categorizadaPor === "manual" ? mov.categoriaId : (resolucoes.get(mov.id)?.categoria?.categoriaId ?? null),
+    ])
+  );
+  const pares = parearEstornos(movimentacoes);
+
   // Agrupa por destino para gravar com um UPDATE por grupo, não por linha.
   const porCategoria = new Map<string, { chave: string | null; ids: string[] }>();
   const porDetalhe = new Map<string, { chave: [string | null, string | null, string | null]; ids: string[] }>();
   for (const mov of movimentacoes) {
-    const r = resolverRegras(mov, ordenadas);
+    const r = resolucoes.get(mov.id)!;
     // Categoria escolhida à mão fica; nome e centro continuam vindo das regras.
     const manual = mov.categorizadaPor === "manual";
-    const categoriaId = manual ? mov.categoriaId : (r.categoria?.categoriaId ?? null);
-    const regraId = manual ? null : (r.categoria?.id ?? null);
+    let categoriaId = categoriaPropria.get(mov.id) ?? null;
+    let regraId = manual ? null : (r.categoria?.id ?? null);
+    // Estorno com ida encontrada herda a categoria dela, sem regra no meio.
+    // Ida sem categoria não ensina nada: vale o que as regras disserem.
+    const ida = manual ? undefined : pares.get(mov.id);
+    const categoriaDaIda = ida ? categoriaPropria.get(ida) : null;
+    if (categoriaDaIda) {
+      categoriaId = categoriaDaIda;
+      regraId = null;
+    }
     const nome = r.nome?.nomeExibicao ?? null;
     const centro = r.centro?.centroCustoId ?? (categoriaId ? (centroPadrao.get(categoriaId) ?? null) : null);
 

@@ -179,6 +179,14 @@ export function CategoriaSelect({
           auto
         </Link>
       ) : null}
+      {valor === (categoriaId ?? "") && categoriaId && origem === "regra" && !regraId ? (
+        <span
+          title="Estorno: herdou a categoria do lançamento que devolveu, para os dois se anularem na DRE"
+          className="text-[10px] font-semibold uppercase text-muted-foreground"
+        >
+          estorno
+        </span>
+      ) : null}
       {valor === (categoriaId ?? "") && origem === "manual" ? (
         <span title="Exceção: escolhida só para esta linha" className="text-[10px] font-semibold uppercase text-muted-foreground">
           só esta

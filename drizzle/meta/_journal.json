@@ -50,6 +50,13 @@
       "when": 1792619855370,
       "tag": "0006_rateio_vendas_por_produto",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1793093504136,
+      "tag": "0007_estornos",
+      "breakpoints": true
     }
   ]
 }
