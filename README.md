@@ -156,6 +156,7 @@ npm run usuario:criar -- email@dominio.com "Nome"   # mostra a senha provisória
 | `npm run db:deploy` | Aplica migrations pendentes |
 | `npm run usuario:criar -- <email> "<nome>"` | Cria acesso / redefine senha |
 | `npm run pluggy:sync [-- <itemId>]` | Sincroniza o extrato fora do cron |
+| `npm test` | Testes: módulos puros com números na mão e todas as consultas do banco num Postgres em processo (PGlite) com dados de exemplo |
 
 ## Estrutura
 
