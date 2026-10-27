@@ -64,7 +64,7 @@ export async function dadosParaAlertas(hoje: string): Promise<DadosParaAlertas> 
         id: pessoas.id,
         nome: pessoas.nome,
         metaCentavos: pessoas.metaMensalCentavos,
-        pago: sql<string>`coalesce((select -sum(m.valor_centavos) from movimentacoes_bancarias m join contas_bancarias c on c.id = m.conta_id where m.pessoa_id = ${pessoas.id} and c.tipo = 'BANK' and m.valor_centavos < 0 and m.data >= ${inicioMes} and m.data < ${fimMes}), 0)`,
+        pago: sql<string>`coalesce((select -sum(m.valor_centavos) from movimentacoes_bancarias m join contas_bancarias c on c.id = m.conta_id where m.pessoa_id = "pessoas"."id" and c.tipo = 'BANK' and m.valor_centavos < 0 and m.data >= ${inicioMes} and m.data < ${fimMes}), 0)`,
       })
       .from(pessoas)
       .where(and(eq(pessoas.ativa, true), isNotNull(pessoas.metaMensalCentavos))),

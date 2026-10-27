@@ -148,8 +148,8 @@ export function avaliarAlertas(configs: ConfigAlerta[], d: DadosParaAlertas): Al
       }
       case "lancamento_grande_sem_categoria": {
         const minimo = parametro(c, "valorCentavos");
-        for (const m of d.semCategoriaGrandes) {
-          if (Math.abs(m.valorCentavos) < minimo) continue;
+        // Os cinco maiores bastam: o resto está na caixa de revisão.
+        for (const m of d.semCategoriaGrandes.filter((m) => Math.abs(m.valorCentavos) >= minimo).slice(0, 5)) {
           saida.push({
             tipo: c.tipo,
             gravidade: "media",
