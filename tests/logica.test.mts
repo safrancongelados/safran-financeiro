@@ -9,7 +9,8 @@ import assert from "node:assert/strict";
 import { parearEstornos, eEstorno } from "../src/lib/estornos";
 import { indexarPessoas, reconhecerPessoa, identificadorDe, lerPadroes, normalizarDocumento } from "../src/lib/pessoas";
 import { identidadesDe } from "../src/lib/regras";
-import { lerFiltroExtrato, intervaloDoFiltro, paramsExtrato, rotuloDoPeriodo } from "../src/lib/extrato-filtros";
+import { alternarOrdem, comVisao, lerFiltroExtrato, intervaloDoFiltro, paramsExtrato, rotuloDoPeriodo } from "../src/lib/extrato-filtros";
+import { agruparIguais, ordenarGrupos } from "../src/lib/extrato";
 import { avaliarAlertas, type ConfigAlerta, type DadosParaAlertas } from "../src/lib/alertas";
 import { preverRecorrencias } from "../src/lib/recorrencias";
 import { gruposParaRevisar } from "../src/lib/revisao";
@@ -97,6 +98,44 @@ assert.equal(rotuloDoPeriodo(f2, "2026-10-27"), "10/01/2026 a 31/01/2026");
 const f3 = lerFiltroExtrato({ de: "2026-02-10", ate: "2026-01-31" }, "2026-10", ok);
 assert.equal(f3.de, undefined);
 assert.deepEqual(intervaloDoFiltro(lerFiltroExtrato({ periodo: "ano" }, "2026-10", ok), "2026-10-27"), { inicio: "2026-01-01", fim: "2026-11-01" });
+
+// Ordenação da visão por nome: vai na URL como a de lançamentos, mas por colunas próprias.
+const fNomes = lerFiltroExtrato({ periodo: "12m", visao: "nomes", ordem: "quantidade" }, "2026-10", ok);
+assert.equal(fNomes.ordem, "quantidade");
+assert.equal(paramsExtrato(fNomes).toString(), "periodo=12m&ordem=quantidade&visao=nomes");
+assert.equal(paramsExtrato(alternarOrdem(fNomes, "quantidade")).toString(), "periodo=12m&ordem=quantidade&dir=asc&visao=nomes");
+assert.equal(paramsExtrato(alternarOrdem(fNomes, "nome")).toString(), "periodo=12m&ordem=nome&visao=nomes");
+// Trocar de visão esquece a ordem que a outra não tem, e mantém a que as duas têm.
+assert.equal(paramsExtrato(comVisao(fNomes, "lancamentos")).toString(), "periodo=12m");
+assert.equal(paramsExtrato(comVisao(alternarOrdem(fNomes, "valor"), "lancamentos")).toString(), "periodo=12m&ordem=valor");
+assert.equal(paramsExtrato(comVisao(lerFiltroExtrato({ mes: "2026-10", ordem: "data", dir: "asc" }, "2026-10", ok), "nomes")).toString(), "mes=2026-10&visao=nomes");
+
+const g = (id: string, data: string, valorCentavos: number, descricao: string, nomeExibicao: string | null = null) => ({
+  id, data, valorCentavos, descricao, nomeExibicao, categoriaId: null, contraparte: null, contraparteDocumento: null,
+});
+const grupos = agruparIguais([
+  g("a1", "2026-10-01", -1000, "Pagamento G Barbosa"),
+  g("a2", "2026-10-02", -1000, "Pagamento G Barbosa"),
+  g("a3", "2026-10-03", -1000, "Pagamento G Barbosa"),
+  g("b1", "2026-10-04", -50000, "Pix enviado Glaucos", "Álvaro"),
+  g("c1", "2026-10-05", 20000, "Pix recebido Maria"),
+  g("c2", "2026-10-06", 20000, "Pix recebido Maria"),
+]);
+const nomes = (gs: typeof grupos) => gs.map((x) => x.exemplo.nomeExibicao ?? x.descricao);
+// Padrão de agruparIguais: saídas primeiro, depois as de mais lançamentos.
+assert.deepEqual(nomes(grupos), ["Pagamento G Barbosa", "Álvaro", "Pix recebido Maria"]);
+assert.equal(ordenarGrupos(grupos, undefined, "desc"), grupos);
+assert.equal(ordenarGrupos(grupos, "data", "desc"), grupos);
+assert.deepEqual(nomes(ordenarGrupos(grupos, "quantidade", "desc")), ["Pagamento G Barbosa", "Pix recebido Maria", "Álvaro"]);
+assert.deepEqual(nomes(ordenarGrupos(grupos, "quantidade", "asc")), ["Álvaro", "Pix recebido Maria", "Pagamento G Barbosa"]);
+// Total pelo tamanho, não pelo sinal: a saída de 500 vem antes da entrada de 400.
+assert.deepEqual(nomes(ordenarGrupos(grupos, "valor", "desc")), ["Álvaro", "Pix recebido Maria", "Pagamento G Barbosa"]);
+assert.deepEqual(nomes(ordenarGrupos(grupos, "valor", "asc")), ["Pagamento G Barbosa", "Pix recebido Maria", "Álvaro"]);
+// Por nome, o nome de exibição vale, sem acento e sem caixa.
+assert.deepEqual(nomes(ordenarGrupos(grupos, "nome", "asc")), ["Álvaro", "Pagamento G Barbosa", "Pix recebido Maria"]);
+assert.deepEqual(nomes(ordenarGrupos(grupos, "nome", "desc")), ["Pix recebido Maria", "Pagamento G Barbosa", "Álvaro"]);
+// Não mexe na lista original.
+assert.deepEqual(nomes(grupos), ["Pagamento G Barbosa", "Álvaro", "Pix recebido Maria"]);
 
 
 }

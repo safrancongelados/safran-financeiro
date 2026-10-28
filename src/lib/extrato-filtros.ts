@@ -13,7 +13,8 @@ export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 const DATA = /^\d{4}-\d{2}-\d{2}$/;
 
 export type TipoMovimento = "entrada" | "saida";
-export type OrdemExtrato = "data" | "valor" | "nome";
+/** `quantidade` (de lançamentos) só existe na visão por nome; `data`, só na de lançamentos. */
+export type OrdemExtrato = "data" | "valor" | "nome" | "quantidade";
 export type Direcao = "asc" | "desc";
 export type VisaoExtrato = "lancamentos" | "nomes";
 export type PeriodoRapido = "3m" | "6m" | "12m" | "ano";
@@ -45,7 +46,13 @@ export interface FiltroExtrato {
   visao?: VisaoExtrato;
 }
 
-const ORDENS: OrdemExtrato[] = ["data", "valor", "nome"];
+const ORDENS: OrdemExtrato[] = ["data", "valor", "nome", "quantidade"];
+
+/** As colunas pelas quais cada visão ordena. */
+export const ORDENS_DA_VISAO: Record<VisaoExtrato, OrdemExtrato[]> = {
+  lancamentos: ["data", "valor", "nome"],
+  nomes: ["nome", "valor", "quantidade"],
+};
 const PERIODOS: PeriodoRapido[] = ["3m", "6m", "12m", "ano"];
 const ORIGENS: OrigemFiltro[] = ["regra", "manual", "pessoa", "estorno"];
 
@@ -64,7 +71,7 @@ export const ORIGEM_LABEL: Record<OrigemFiltro, string> = {
 };
 
 /** A direção que cada ordenação tem quando não se pede outra. */
-export const DIRECAO_PADRAO: Record<OrdemExtrato, Direcao> = { data: "desc", valor: "desc", nome: "asc" };
+export const DIRECAO_PADRAO: Record<OrdemExtrato, Direcao> = { data: "desc", valor: "desc", nome: "asc", quantidade: "desc" };
 
 type Params = Record<string, string | string[] | undefined>;
 
@@ -175,6 +182,21 @@ export function alternarOrdem(filtro: FiltroExtrato, ordem: OrdemExtrato): Filtr
   const vigente = ordemEmVigor(filtro);
   const dir: Direcao = vigente.ordem === ordem ? (vigente.dir === "asc" ? "desc" : "asc") : DIRECAO_PADRAO[ordem];
   return { ...filtro, ordem, dir };
+}
+
+/**
+ * Troca de visão. Uma ordenação que a outra visão não tem (por data na visão
+ * por nome; por quantidade na de lançamentos) é esquecida, e a visão de
+ * destino abre na ordem padrão dela.
+ */
+export function comVisao(filtro: FiltroExtrato, visao: VisaoExtrato): FiltroExtrato {
+  const mantem = filtro.ordem && ORDENS_DA_VISAO[visao].includes(filtro.ordem);
+  return {
+    ...filtro,
+    visao: visao === "nomes" ? "nomes" : undefined,
+    ordem: mantem ? filtro.ordem : undefined,
+    dir: mantem ? filtro.dir : undefined,
+  };
 }
 
 // ── Período ────────────────────────────────────────────────────────────────

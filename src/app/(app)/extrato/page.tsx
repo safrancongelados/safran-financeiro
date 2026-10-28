@@ -24,9 +24,10 @@ import {
 import { listarPessoasAtivas, listarVisoesSalvas } from "@/db/queries/pessoas";
 import { obterSessao } from "@/lib/auth";
 import { formatarCentavos } from "@/lib/dinheiro";
-import { agruparIguais, formatarDocumento, statusConexao } from "@/lib/extrato";
+import { agruparIguais, formatarDocumento, nomeDoGrupo, ordenarGrupos, statusConexao } from "@/lib/extrato";
 import {
   alternarOrdem,
+  comVisao,
   hrefExtrato,
   intervaloDoFiltro,
   lerFiltroExtrato,
@@ -223,7 +224,7 @@ export default async function ExtratoPage({ searchParams }: PageProps<"/extrato"
   const doCaixa = linhas.filter((l) => l.contaTipo === "BANK" && l.categoriaSecao !== "transferencia");
   const entradasFiltro = doCaixa.filter((l) => l.valorCentavos > 0).reduce((acc, l) => acc + l.valorCentavos, 0);
   const saidasFiltro = doCaixa.filter((l) => l.valorCentavos < 0).reduce((acc, l) => acc + l.valorCentavos, 0);
-  const grupos = porNome ? agruparIguais(linhas) : [];
+  const grupos = porNome ? ordenarGrupos(agruparIguais(linhas), filtro.ordem, ordemEmVigor(filtro).dir) : [];
   const valores = Object.fromEntries(linhas.map((l) => [l.id, l.valorCentavos]));
   const idsDaTela = linhas.map((l) => l.id);
 
@@ -302,10 +303,10 @@ export default async function ExtratoPage({ searchParams }: PageProps<"/extrato"
 
         <div className="mb-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
           <GrupoChips>
-            <Chip href={hrefExtrato({ ...filtro, visao: undefined })} ativo={!porNome}>
+            <Chip href={hrefExtrato(comVisao(filtro, "lancamentos"))} ativo={!porNome}>
               Lançamentos
             </Chip>
-            <Chip href={hrefExtrato({ ...filtro, visao: "nomes" })} ativo={porNome}>
+            <Chip href={hrefExtrato(comVisao(filtro, "nomes"))} ativo={porNome}>
               Por nome
             </Chip>
             <span className="mx-1 h-4 w-px bg-border" aria-hidden />
@@ -345,9 +346,15 @@ export default async function ExtratoPage({ searchParams }: PageProps<"/extrato"
             <Table className="min-w-[900px]">
               <TableHeader>
                 <TableRow>
-                  <TableHead>Nome</TableHead>
-                  <TableHead className="text-right">Lançamentos</TableHead>
-                  <TableHead className="text-right">Total</TableHead>
+                  <CabecalhoOrdenavel filtro={filtro} ordem="nome">
+                    Nome
+                  </CabecalhoOrdenavel>
+                  <CabecalhoOrdenavel filtro={filtro} ordem="quantidade" className="text-right">
+                    Lançamentos
+                  </CabecalhoOrdenavel>
+                  <CabecalhoOrdenavel filtro={filtro} ordem="valor" className="text-right">
+                    Total
+                  </CabecalhoOrdenavel>
                   <TableHead>Categoria e centro</TableHead>
                 </TableRow>
               </TableHeader>
@@ -363,7 +370,7 @@ export default async function ExtratoPage({ searchParams }: PageProps<"/extrato"
                           nomeExibicao={g.exemplo.nomeExibicao}
                         />
                       ) : (
-                        <span className="text-foreground">{g.exemplo.nomeExibicao ?? g.descricao}</span>
+                        <span className="text-foreground">{nomeDoGrupo(g)}</span>
                       )}
                       <p className="mt-0.5 text-xs text-muted-foreground">
                         {g.exemplo.contraparte ?? null}
@@ -378,7 +385,7 @@ export default async function ExtratoPage({ searchParams }: PageProps<"/extrato"
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
                       <Link
-                        href={hrefExtrato({ ...filtro, visao: undefined, q: g.busca })}
+                        href={hrefExtrato({ ...comVisao(filtro, "lancamentos"), q: g.busca })}
                         scroll={false}
                         className="text-foreground underline-offset-2 hover:underline"
                         title="Ver os lançamentos"

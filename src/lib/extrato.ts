@@ -1,4 +1,5 @@
 /** Regras de exibição do extrato bancário — sem I/O. */
+import type { Direcao, OrdemExtrato } from "./extrato-filtros";
 import { regraAPartirDe, sentidoDe, type MovimentacaoParaRegra } from "./regras";
 
 /** CPF/CNPJ formatado; máscara do banco (com "*") passa como veio. */
@@ -131,4 +132,42 @@ export function agruparIguais<M extends MovimentacaoAgrupavel>(movs: M[]): Grupo
         b.quantidade - a.quantidade ||
         Math.abs(b.totalCentavos) - Math.abs(a.totalCentavos)
     );
+}
+
+/** O nome que a visão por nome mostra para o grupo. */
+export function nomeDoGrupo(g: GrupoIguais<MovimentacaoAgrupavel>): string {
+  return g.exemplo.nomeExibicao ?? g.descricao;
+}
+
+const COMPARA_NOME = new Intl.Collator("pt-BR", { sensitivity: "base", numeric: true });
+
+/**
+ * Os grupos na ordem pedida pelo cabeçalho da visão por nome: `nome`,
+ * `valor` (o total, pelo tamanho e não pelo sinal — como na visão de
+ * lançamentos, "maiores primeiro" mistura entradas e saídas) ou `quantidade`
+ * (de lançamentos). Qualquer outra ordem, ou nenhuma, mantém a ordem padrão
+ * de `agruparIguais`. Empates seguem o desempate padrão. Não altera a lista.
+ */
+export function ordenarGrupos<M extends MovimentacaoAgrupavel>(
+  grupos: GrupoIguais<M>[],
+  ordem: OrdemExtrato | undefined,
+  dir: Direcao
+): GrupoIguais<M>[] {
+  if (ordem !== "nome" && ordem !== "valor" && ordem !== "quantidade") return grupos;
+  // Comparadores crescentes; `sinal` vira a coluna pedida. Os desempates são
+  // fixos: mais lançamentos e maior total primeiro, nome de A a Z.
+  const sinal = dir === "asc" ? 1 : -1;
+  const quantidade = (a: GrupoIguais<M>, b: GrupoIguais<M>) => a.quantidade - b.quantidade;
+  const total = (a: GrupoIguais<M>, b: GrupoIguais<M>) => Math.abs(a.totalCentavos) - Math.abs(b.totalCentavos);
+  const nome = (a: GrupoIguais<M>, b: GrupoIguais<M>) => COMPARA_NOME.compare(nomeDoGrupo(a), nomeDoGrupo(b));
+  return [...grupos].sort((a, b) => {
+    switch (ordem) {
+      case "nome":
+        return sinal * nome(a, b) || -quantidade(a, b) || -total(a, b);
+      case "valor":
+        return sinal * total(a, b) || -quantidade(a, b) || nome(a, b);
+      default:
+        return sinal * quantidade(a, b) || -total(a, b) || nome(a, b);
+    }
+  });
 }
