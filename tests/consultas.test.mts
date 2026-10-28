@@ -24,16 +24,18 @@ Module._resolveFilename = function (this: unknown, ...args: unknown[]) {
 const { db, pglite, pronto } = require(SHIM) as typeof import("./db-pglite");
 await pronto;
 
+// O caminho é montado em tempo de execução (para o import não ser içado
+// antes do shim); o tipo vem do módulo de verdade, para o build checar o teste.
 const S = new URL("../src", import.meta.url).pathname;
-const fin = await import(`${S}/db/queries/financeiro`);
-const pes = await import(`${S}/db/queries/pessoas`);
-const rel = await import(`${S}/db/queries/relatorios`);
-const ale = await import(`${S}/db/queries/alertas`);
-const rec = await import(`${S}/db/queries/recorrencias`);
-const dados = await import(`${S}/lib/relatorios-dados`);
-const cat = await import(`${S}/lib/categorizacao`);
-const filtros = await import(`${S}/lib/extrato-filtros`);
-const periodo = await import(`${S}/lib/periodo`);
+const fin = (await import(`${S}/db/queries/financeiro`)) as typeof import("../src/db/queries/financeiro");
+const pes = (await import(`${S}/db/queries/pessoas`)) as typeof import("../src/db/queries/pessoas");
+const rel = (await import(`${S}/db/queries/relatorios`)) as typeof import("../src/db/queries/relatorios");
+const ale = (await import(`${S}/db/queries/alertas`)) as typeof import("../src/db/queries/alertas");
+const rec = (await import(`${S}/db/queries/recorrencias`)) as typeof import("../src/db/queries/recorrencias");
+const dados = (await import(`${S}/lib/relatorios-dados`)) as typeof import("../src/lib/relatorios-dados");
+const cat = (await import(`${S}/lib/categorizacao`)) as typeof import("../src/lib/categorizacao");
+const filtros = (await import(`${S}/lib/extrato-filtros`)) as typeof import("../src/lib/extrato-filtros");
+const periodo = (await import(`${S}/lib/periodo`)) as typeof import("../src/lib/periodo");
 
 const hoje = "2026-10-27";
 // Semente: uma conexão, uma conta, pessoas e um ano de lançamentos variados.
