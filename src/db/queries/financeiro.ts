@@ -166,6 +166,7 @@ function ordenacao(filtro: FiltroExtrato): SQL[] {
     case "nome":
       return [sentido(semAcento(sql`coalesce(${movimentacoesBancarias.nomeExibicao}, ${movimentacoesBancarias.descricao})`)), ...porData];
     default:
+      // "data" — e "quantidade", que só a visão por nome tem, cai aqui.
       return [sentido(movimentacoesBancarias.data), sentido(movimentacoesBancarias.createdAt)];
   }
 }
